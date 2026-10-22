@@ -1,0 +1,48 @@
+Fieldname								Type						Description
+ProductId								string(20)					WORTMANN AG product ID
+ReferenceNo								string(20)					manufacturer part number
+EAN										string(13)					EAN code
+Manufacturer							string(20)					manufacturer name
+Price_B2B_Regular						decimal						regular price for B2B customer
+Price_B2B_Discounted					decimal						discounted price for B2B customer
+Price_B2B_DiscountPercent				decimal						discount in percent that is granted on regular price
+Price_B2B_DiscountAmount				decimal						discount amount that is granted on regular price
+Price_B2C_exclVAT						decimal						recommended retail price excluding VAT
+Price_B2C_inclVAT						decimal						recommended retail price including vat
+Price_B2C_VATRate						decimal						vat rate that is applied on recommended retail price
+Price_B2C_VATCountry					string(10)					the underlying country code (DE, UK, CH, ...) for the vat rate used
+Price_B2X_Currency						string(10)					the currency (EUR, GBR, CHF, ...)
+Stock									integer						current stock available
+StockNextDelivery						datetime					next delivery date, if empty the product is ordered only on your request
+StockNextDeliveryAccessVolume			integer						the quantity that will be available at next delivery, if this is zero and StockNextDelivery field is NOT empty, StockNextDelivery contains the expected availability date if you order today
+WarrantyCode							string(10)					identifier for the standard product warranty
+EOL										bit							end of life product
+Promotion								bit							the product is currently promoted, i.e. special price
+NonReturnable							bit							the product cannot be returned, licenses for example
+RemainingStock							bit							remainders, remnants
+ImagePrimary							string(50)					filename of the primary product image, image itself is contained in image archive on your ftp account or may be downloaded from the following base URL: http://www.wortmann.de/content/files/images/ProductImages/large/
+ImageAdditional							string(unlimited)			filenames of additional product images separated by pipe (|)
+ProductLink								string(unlimited)			link to the end customer product page on our homepage, available only for terra brand
+GrossWeight								decimal						gross weight of the product (including packaging)
+NetWeight								decimal						net weight of the product (excluding packaging)
+RelatedProducts							string(unlimited)			product IDs of related products separated by pipe (|), the related product itself is also contained in this list
+AccessoryProducts						string(unlimited) 			product IDs of accessory products separated by pipe (|), the accessory product itself is also contained in this list
+Description_1031_German					string(50)					product description in German
+CategoryName_1031_German				string(50)					product category name (i.e. Operating Systems) in German
+CategoryPath_1031_German				string(unlimited)			product category path (i.e. Software|Operating Systems) in German separated by pipe (|)
+WarrantyDescription_1031_German			string(50)					warranty description in German
+Description_1033_English				string(50)					product description in English
+CategoryName_1033_English				string(50)					product category name (i.e. Operating Systems) in English
+CategoryPath_1033_English				string(unlimited)			product category path (i.e. Software|Operating Systems) in English separated by pipe (|)
+WarrantyDescription_1033_English		string(50)					warranty description in English
+Description_1036_French					string(50)					product description in French
+CategoryName_1036_French				string(50)					product category name (i.e. Operating Systems) in French
+CategoryPath_1036_French				string(unlimited)			product category path (i.e. Software|Operating Systems) in French separated by pipe (|)
+WarrantyDescription_1036_French			string(50)					warranty description in French
+Description_1043_Dutch					string(50)					product description in Dutch
+CategoryName_1043_Dutch					string(50)					product category name (i.e. Operating Systems) in Dutch
+CategoryPath_1043_Dutch					string(unlimited)			product category path (i.e. Software|Operating Systems) in Dutch separated by pipe (|)
+WarrantyDescription_1043_Dutch			string(50)					warranty description in Dutch
+ProductDisplayType						string(20)					display type for the product, i.e. RegularProduct*, BTO, BTOandRegular*, Solution, Info (only types marked with asterisk are exported in this list)
+LicenseTypeCode							string(20)					license type code (i.e. "MSOV")
+LicenseTypeDescription					string(50)					license type description (i.e. "Open License")

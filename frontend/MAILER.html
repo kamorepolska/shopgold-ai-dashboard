@@ -1,0 +1,2298 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>MAILER — Email Marketing & Sales Automation</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{colors:{primary:'#185FA5','primary-dark':'#144e8a'}}}}</script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#f1f5f9}
+::-webkit-scrollbar-thumb{background:#cbd5e1;border-radius:3px}
+.drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40}
+.drawer{position:fixed;right:0;top:0;height:100%;width:480px;background:#fff;z-index:50;box-shadow:-4px 0 20px rgba(0,0,0,.15);overflow-y:auto;transform:translateX(100%);transition:transform .3s ease}
+.drawer.open{transform:translateX(0)}
+.flow-node{position:relative;display:flex;flex-direction:column;align-items:center;min-width:140px}
+.flow-node::after{content:'';position:absolute;bottom:-24px;left:50%;transform:translateX(-50%);width:2px;height:24px;background:#cbd5e1}
+.flow-node:last-child::after{display:none}
+.kanban-card{cursor:grab;user-select:none}
+.kanban-card:active{cursor:grabbing;opacity:.8}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.fade-in{animation:fadeIn .2s ease}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const {useState,useEffect,useReducer,useCallback,useMemo,useRef} = React;
+
+
+// No Recharts - using inline SVG
+
+// ============================================================
+// MOCK DATA
+// ============================================================
+const CONTACTS = [{
+  id: 1,
+  fn: 'Anna',
+  ln: 'Kowalska',
+  email: 'anna.kowalska@techpol.pl',
+  company: 'TechPol Sp. z o.o.',
+  tags: ['vip', 'newsletter'],
+  score: 87,
+  lastActivity: '2026-05-09',
+  city: 'Warszawa',
+  phone: '+48 123 456 789',
+  status: 'hot'
+}, {
+  id: 2,
+  fn: 'Marek',
+  ln: 'Nowak',
+  email: 'marek.nowak@globalnet.pl',
+  company: 'GlobalNet S.A.',
+  tags: ['newsletter', 'promo'],
+  score: 62,
+  lastActivity: '2026-05-07',
+  city: 'Kraków',
+  phone: '+48 987 654 321',
+  status: 'warm'
+}, {
+  id: 3,
+  fn: 'Katarzyna',
+  ln: 'Wiśniewska',
+  email: 'k.wisniewska@design24.pl',
+  company: 'Design24',
+  tags: ['vip', 'webinar'],
+  score: 94,
+  lastActivity: '2026-05-10',
+  city: 'Wrocław',
+  phone: '+48 555 123 456',
+  status: 'hot'
+}, {
+  id: 4,
+  fn: 'Piotr',
+  ln: 'Zając',
+  email: 'pzajac@mediapro.pl',
+  company: 'MediaPro',
+  tags: ['cold', 'newsletter'],
+  score: 23,
+  lastActivity: '2026-04-15',
+  city: 'Gdańsk',
+  phone: '+48 666 789 012',
+  status: 'cold'
+}, {
+  id: 5,
+  fn: 'Monika',
+  ln: 'Lewandowska',
+  email: 'monika@ecomshop.pl',
+  company: 'EcomShop',
+  tags: ['vip', 'promo', 'newsletter'],
+  score: 78,
+  lastActivity: '2026-05-08',
+  city: 'Poznań',
+  phone: '+48 777 345 678',
+  status: 'hot'
+}, {
+  id: 6,
+  fn: 'Tomasz',
+  ln: 'Wójcik',
+  email: 'tomasz.wojcik@itpro.pl',
+  company: 'ITPro',
+  tags: ['newsletter'],
+  score: 45,
+  lastActivity: '2026-05-01',
+  city: 'Łódź',
+  phone: '+48 888 901 234',
+  status: 'warm'
+}, {
+  id: 7,
+  fn: 'Agnieszka',
+  ln: 'Kamińska',
+  email: 'agnieszka@studio24.pl',
+  company: 'Studio 24',
+  tags: ['webinar', 'promo'],
+  score: 69,
+  lastActivity: '2026-05-06',
+  city: 'Warszawa',
+  phone: '+48 111 234 567',
+  status: 'warm'
+}, {
+  id: 8,
+  fn: 'Krzysztof',
+  ln: 'Szymański',
+  email: 'kszymanski@logistex.pl',
+  company: 'LogisTeX',
+  tags: ['cold'],
+  score: 12,
+  lastActivity: '2026-03-20',
+  city: 'Katowice',
+  phone: '+48 222 345 678',
+  status: 'cold'
+}, {
+  id: 9,
+  fn: 'Joanna',
+  ln: 'Dąbrowska',
+  email: 'joanna.d@fashionhub.pl',
+  company: 'FashionHub',
+  tags: ['vip', 'newsletter', 'promo'],
+  score: 91,
+  lastActivity: '2026-05-10',
+  city: 'Kraków',
+  phone: '+48 333 456 789',
+  status: 'hot'
+}, {
+  id: 10,
+  fn: 'Bartosz',
+  ln: 'Kozłowski',
+  email: 'b.kozlowski@smartbiz.pl',
+  company: 'SmartBiz',
+  tags: ['newsletter', 'webinar'],
+  score: 54,
+  lastActivity: '2026-04-28',
+  city: 'Wrocław',
+  phone: '+48 444 567 890',
+  status: 'warm'
+}, {
+  id: 11,
+  fn: 'Natalia',
+  ln: 'Michalska',
+  email: 'natalia.m@fintech360.pl',
+  company: 'FinTech360',
+  tags: ['vip', 'promo'],
+  score: 83,
+  lastActivity: '2026-05-09',
+  city: 'Warszawa',
+  phone: '+48 555 678 901',
+  status: 'hot'
+}, {
+  id: 12,
+  fn: 'Rafał',
+  ln: 'Piotrowski',
+  email: 'r.piotrowski@cloudsys.pl',
+  company: 'CloudSys',
+  tags: ['newsletter'],
+  score: 37,
+  lastActivity: '2026-04-20',
+  city: 'Gdańsk',
+  phone: '+48 666 789 012',
+  status: 'cold'
+}, {
+  id: 13,
+  fn: 'Magdalena',
+  ln: 'Grabowska',
+  email: 'magda@socialboost.pl',
+  company: 'SocialBoost',
+  tags: ['vip', 'webinar', 'newsletter'],
+  score: 76,
+  lastActivity: '2026-05-05',
+  city: 'Poznań',
+  phone: '+48 777 890 123',
+  status: 'warm'
+}, {
+  id: 14,
+  fn: 'Łukasz',
+  ln: 'Pawlak',
+  email: 'l.pawlak@marketlab.pl',
+  company: 'MarketLab',
+  tags: ['promo'],
+  score: 48,
+  lastActivity: '2026-04-25',
+  city: 'Łódź',
+  phone: '+48 888 901 234',
+  status: 'warm'
+}, {
+  id: 15,
+  fn: 'Ewa',
+  ln: 'Kaczmarek',
+  email: 'ewa.k@retail360.pl',
+  company: 'Retail360',
+  tags: ['vip', 'newsletter'],
+  score: 58,
+  lastActivity: '2026-05-03',
+  city: 'Katowice',
+  phone: '+48 999 012 345',
+  status: 'warm'
+}];
+const CAMPAIGNS = [{
+  id: 1,
+  name: 'Wiosenna Promocja 2026',
+  status: 'completed',
+  sent: 1450,
+  opened: 486,
+  clicked: 89,
+  date: '2026-04-15',
+  subject: 'Wyjątkowe oferty na wiosnę! 🌸',
+  from: 'Marek Wiśniewski',
+  replyTo: 'kontakt@firma.pl',
+  segment: 'newsletter',
+  progress: 100
+}, {
+  id: 2,
+  name: 'Newsletter Maj 2026',
+  status: 'active',
+  sent: 2100,
+  opened: 798,
+  clicked: 143,
+  date: '2026-05-01',
+  subject: 'Najnowsze trendy i aktualności',
+  from: 'Redakcja',
+  replyTo: 'newsletter@firma.pl',
+  segment: 'all',
+  progress: 78
+}, {
+  id: 3,
+  name: 'VIP Exclusive Offer',
+  status: 'active',
+  sent: 420,
+  opened: 315,
+  clicked: 98,
+  date: '2026-05-05',
+  subject: 'Specjalna oferta tylko dla VIP 👑',
+  from: 'Team VIP',
+  replyTo: 'vip@firma.pl',
+  segment: 'vip',
+  progress: 65
+}, {
+  id: 4,
+  name: 'Webinar Czerwiec 2026',
+  status: 'draft',
+  sent: 0,
+  opened: 0,
+  clicked: 0,
+  date: '2026-06-10',
+  subject: 'Zapraszamy: "Automatyzacja sprzedaży"',
+  from: 'Dział Marketingu',
+  replyTo: 'webinar@firma.pl',
+  segment: 'webinar',
+  progress: 0
+}, {
+  id: 5,
+  name: 'Re-engagement zimny',
+  status: 'paused',
+  sent: 340,
+  opened: 41,
+  clicked: 8,
+  date: '2026-04-28',
+  subject: 'Tęsknimy za Tobą! Wróć do nas 💙',
+  from: 'Team',
+  replyTo: 'kontakt@firma.pl',
+  segment: 'cold',
+  progress: 45
+}];
+const AUTOMATIONS = [{
+  id: 1,
+  name: 'Onboarding nowego kontaktu',
+  trigger: 'Rejestracja w sklepie',
+  active: 47,
+  total: 312,
+  status: 'active',
+  steps: [{
+    id: 'a1',
+    type: 'trigger',
+    label: 'Rejestracja',
+    count: 312
+  }, {
+    id: 'a2',
+    type: 'action',
+    label: 'Wyślij mail powitalny',
+    count: 312
+  }, {
+    id: 'a3',
+    type: 'wait',
+    label: 'Czekaj 2 dni',
+    count: 290
+  }, {
+    id: 'a4',
+    type: 'condition',
+    label: 'Otworzył mail?',
+    count: 180,
+    yes: 'Wyślij demo',
+    no: 'Przypomnij'
+  }, {
+    id: 'a5',
+    type: 'action',
+    label: 'Dodaj tag: onboarded',
+    count: 290
+  }, {
+    id: 'a6',
+    type: 'end',
+    label: 'Koniec',
+    count: 290
+  }]
+}, {
+  id: 2,
+  name: 'Re-engagement zimnych',
+  trigger: 'Brak aktywności 30 dni',
+  active: 23,
+  total: 89,
+  status: 'active',
+  steps: [{
+    id: 'b1',
+    type: 'trigger',
+    label: 'Brak aktywności 30 dni',
+    count: 89
+  }, {
+    id: 'b2',
+    type: 'action',
+    label: 'Wyślij "Tęsknimy"',
+    count: 89
+  }, {
+    id: 'b3',
+    type: 'wait',
+    label: 'Czekaj 7 dni',
+    count: 81
+  }, {
+    id: 'b4',
+    type: 'condition',
+    label: 'Kliknął link?',
+    count: 31,
+    yes: 'Reaktywuj',
+    no: 'Usuń z listy'
+  }, {
+    id: 'b5',
+    type: 'action',
+    label: 'Zmień status',
+    count: 81
+  }, {
+    id: 'b6',
+    type: 'end',
+    label: 'Koniec',
+    count: 81
+  }]
+}, {
+  id: 3,
+  name: 'Porzucony koszyk',
+  trigger: 'Porzucony koszyk w sklepie',
+  active: 15,
+  total: 156,
+  status: 'paused',
+  steps: [{
+    id: 'c1',
+    type: 'trigger',
+    label: 'Porzucony koszyk',
+    count: 156
+  }, {
+    id: 'c2',
+    type: 'wait',
+    label: 'Czekaj 1 godzinę',
+    count: 156
+  }, {
+    id: 'c3',
+    type: 'action',
+    label: 'Wyślij przypomnienie',
+    count: 156
+  }, {
+    id: 'c4',
+    type: 'wait',
+    label: 'Czekaj 24h',
+    count: 148
+  }, {
+    id: 'c5',
+    type: 'condition',
+    label: 'Dokonał zakupu?',
+    count: 45,
+    yes: 'Zakończ',
+    no: 'Wyślij rabat'
+  }, {
+    id: 'c6',
+    type: 'action',
+    label: 'Wyślij kupon -15%',
+    count: 103
+  }, {
+    id: 'c7',
+    type: 'end',
+    label: 'Koniec',
+    count: 148
+  }]
+}];
+const OPENS = [{
+  id: 1,
+  contactId: 1,
+  name: 'Anna Kowalska',
+  campaign: 'VIP Exclusive Offer',
+  date: '2026-05-06',
+  time: '09:23',
+  device: 'desktop',
+  city: 'Warszawa',
+  count: 3
+}, {
+  id: 2,
+  contactId: 3,
+  name: 'Katarzyna Wiśniewska',
+  campaign: 'VIP Exclusive Offer',
+  date: '2026-05-06',
+  time: '10:45',
+  device: 'mobile',
+  city: 'Wrocław',
+  count: 1
+}, {
+  id: 3,
+  contactId: 9,
+  name: 'Joanna Dąbrowska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-02',
+  time: '11:12',
+  device: 'desktop',
+  city: 'Kraków',
+  count: 2
+}, {
+  id: 4,
+  contactId: 5,
+  name: 'Monika Lewandowska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-02',
+  time: '08:55',
+  device: 'mobile',
+  city: 'Poznań',
+  count: 1
+}, {
+  id: 5,
+  contactId: 11,
+  name: 'Natalia Michalska',
+  campaign: 'VIP Exclusive Offer',
+  date: '2026-05-05',
+  time: '14:30',
+  device: 'desktop',
+  city: 'Warszawa',
+  count: 4
+}, {
+  id: 6,
+  contactId: 2,
+  name: 'Marek Nowak',
+  campaign: 'Wiosenna Promocja 2026',
+  date: '2026-04-16',
+  time: '07:45',
+  device: 'mobile',
+  city: 'Kraków',
+  count: 1
+}, {
+  id: 7,
+  contactId: 7,
+  name: 'Agnieszka Kamińska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-03',
+  time: '13:20',
+  device: 'desktop',
+  city: 'Warszawa',
+  count: 2
+}, {
+  id: 8,
+  contactId: 13,
+  name: 'Magdalena Grabowska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-01',
+  time: '09:05',
+  device: 'mobile',
+  city: 'Poznań',
+  count: 1
+}, {
+  id: 9,
+  contactId: 11,
+  name: 'Natalia Michalska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-01',
+  time: '10:15',
+  device: 'desktop',
+  city: 'Warszawa',
+  count: 3
+}, {
+  id: 10,
+  contactId: 3,
+  name: 'Katarzyna Wiśniewska',
+  campaign: 'Wiosenna Promocja 2026',
+  date: '2026-04-15',
+  time: '17:30',
+  device: 'desktop',
+  city: 'Wrocław',
+  count: 2
+}, {
+  id: 11,
+  contactId: 1,
+  name: 'Anna Kowalska',
+  campaign: 'Newsletter Maj 2026',
+  date: '2026-05-01',
+  time: '08:10',
+  device: 'mobile',
+  city: 'Warszawa',
+  count: 1
+}, {
+  id: 12,
+  contactId: 9,
+  name: 'Joanna Dąbrowska',
+  campaign: 'VIP Exclusive Offer',
+  date: '2026-05-05',
+  time: '12:00',
+  device: 'desktop',
+  city: 'Kraków',
+  count: 5
+}];
+const TEMPLATES = [{
+  id: 1,
+  name: 'Promocja Sezonowa',
+  cat: 'promocja',
+  color: '#185FA5',
+  desc: 'Szablon z banerem i przyciskiem CTA'
+}, {
+  id: 2,
+  name: 'Newsletter Pro',
+  cat: 'newsletter',
+  color: '#16a34a',
+  desc: 'Czysty layout dwukolumnowy'
+}, {
+  id: 3,
+  name: 'Onboarding Welcome',
+  cat: 'onboarding',
+  color: '#7c3aed',
+  desc: 'Mail powitalny z krokami'
+}, {
+  id: 4,
+  name: 'Porzucony Koszyk',
+  cat: 'transakcyjny',
+  color: '#ea580c',
+  desc: 'Przypomnienie o zakupie'
+}, {
+  id: 5,
+  name: 'VIP Exclusive',
+  cat: 'promocja',
+  color: '#b45309',
+  desc: 'Ekskluzywny layout złoty'
+}, {
+  id: 6,
+  name: 'Webinar Zaproszenie',
+  cat: 'newsletter',
+  color: '#0891b2',
+  desc: 'Zaproszenie z licznikiem'
+}, {
+  id: 7,
+  name: 'Potwierdzenie zamówienia',
+  cat: 'transakcyjny',
+  color: '#16a34a',
+  desc: 'Mail transakcyjny'
+}, {
+  id: 8,
+  name: 'Re-engagement',
+  cat: 'newsletter',
+  color: '#dc2626',
+  desc: 'Odzyskaj nieaktywnych'
+}];
+const SCORING_RULES = [{
+  id: 1,
+  action: 'Otwarcie maila',
+  points: 10,
+  icon: 'mail'
+}, {
+  id: 2,
+  action: 'Kliknięcie w link',
+  points: 20,
+  icon: 'mouse'
+}, {
+  id: 3,
+  action: 'Wizyta na stronie',
+  points: 15,
+  icon: 'globe'
+}, {
+  id: 4,
+  action: 'Wypełnienie formularza',
+  points: 30,
+  icon: 'file'
+}, {
+  id: 5,
+  action: 'Dodanie do koszyka',
+  points: 25,
+  icon: 'cart'
+}, {
+  id: 6,
+  action: 'Dokonanie zakupu',
+  points: 50,
+  icon: 'check'
+}, {
+  id: 7,
+  action: 'Rejestracja na webinar',
+  points: 35,
+  icon: 'video'
+}, {
+  id: 8,
+  action: 'Brak aktywności 7 dni',
+  points: -10,
+  icon: 'minus'
+}];
+const WEEK_DATA = [{
+  day: 'Pon',
+  sent: 245,
+  opened: 87,
+  clicked: 23
+}, {
+  day: 'Wt',
+  sent: 380,
+  opened: 142,
+  clicked: 41
+}, {
+  day: 'Śr',
+  sent: 190,
+  opened: 68,
+  clicked: 18
+}, {
+  day: 'Czw',
+  sent: 520,
+  opened: 203,
+  clicked: 67
+}, {
+  day: 'Pt',
+  sent: 445,
+  opened: 178,
+  clicked: 52
+}, {
+  day: 'Sob',
+  sent: 120,
+  opened: 43,
+  clicked: 11
+}, {
+  day: 'Nd',
+  sent: 95,
+  opened: 31,
+  clicked: 8
+}];
+const HOUR_DATA = Array.from({
+  length: 24
+}, (_, h) => ({
+  hour: `${h}:00`,
+  opens: h < 6 ? Math.floor(Math.random() * 5) : h < 9 ? Math.floor(30 + Math.random() * 40) : h < 12 ? Math.floor(60 + Math.random() * 80) : h < 14 ? Math.floor(40 + Math.random() * 60) : h < 18 ? Math.floor(50 + Math.random() * 70) : h < 22 ? Math.floor(20 + Math.random() * 40) : Math.floor(Math.random() * 10)
+}));
+const HISTORY = {
+  1: [{
+    type: 'open',
+    campaign: 'VIP Exclusive Offer',
+    date: '2026-05-06 09:23',
+    device: 'desktop'
+  }, {
+    type: 'click',
+    campaign: 'VIP Exclusive Offer',
+    date: '2026-05-06 09:25',
+    device: 'desktop'
+  }, {
+    type: 'open',
+    campaign: 'Newsletter Maj 2026',
+    date: '2026-05-01 08:10',
+    device: 'mobile'
+  }],
+  3: [{
+    type: 'open',
+    campaign: 'VIP Exclusive Offer',
+    date: '2026-05-06 10:45',
+    device: 'mobile'
+  }, {
+    type: 'open',
+    campaign: 'Wiosenna Promocja',
+    date: '2026-04-15 17:30',
+    device: 'desktop'
+  }, {
+    type: 'click',
+    campaign: 'Wiosenna Promocja',
+    date: '2026-04-15 17:33',
+    device: 'desktop'
+  }],
+  9: [{
+    type: 'open',
+    campaign: 'VIP Exclusive Offer',
+    date: '2026-05-05 12:00',
+    device: 'desktop'
+  }, {
+    type: 'click',
+    campaign: 'VIP Exclusive Offer',
+    date: '2026-05-05 12:03',
+    device: 'desktop'
+  }, {
+    type: 'open',
+    campaign: 'Newsletter Maj 2026',
+    date: '2026-05-02 11:12',
+    device: 'desktop'
+  }, {
+    type: 'click',
+    campaign: 'Newsletter Maj 2026',
+    date: '2026-05-02 11:15',
+    device: 'desktop'
+  }]
+};
+// ============================================================
+// ICONS (inline SVG)
+// ============================================================
+const Ic = ({
+  name,
+  size = 16,
+  cls = ''
+}) => {
+  const paths = {
+    dashboard: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6',
+    mail: 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z',
+    zap: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+    users: 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75',
+    eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 100 6 3 3 0 000-6z',
+    trending: 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6',
+    file: 'M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8zM14 2v6h6M16 13H8M16 17H8M10 9H8',
+    plus: 'M12 5v14M5 12h14',
+    search: 'M21 21l-4.35-4.35M17 11A6 6 0 105 11a6 6 0 0012 0z',
+    x: 'M18 6L6 18M6 6l12 12',
+    check: 'M20 6L9 17l-5-5',
+    chevright: 'M9 18l6-6-6-6',
+    chevdown: 'M6 9l6 6 6-6',
+    arrleft: 'M19 12H5M12 19l-7-7 7-7',
+    send: 'M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z',
+    edit: 'M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z',
+    trash: 'M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6',
+    clock: 'M12 2a10 10 0 100 20A10 10 0 0012 2zM12 6v6l4 2',
+    tag: 'M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82zM7 7h.01',
+    bar: 'M18 20V10M12 20V4M6 20v-6',
+    settings: 'M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z',
+    play: 'M5 3l14 9-14 9V3z',
+    pause: 'M6 4h4v16H6zM14 4h4v16h-4z',
+    phone: 'M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.77 19.79 19.79 0 01.22 1.14 2 2 0 012.22 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.91a16 16 0 006.18 6.18l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z',
+    globe: 'M12 2a10 10 0 100 20A10 10 0 0012 2zM2 12h20M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z',
+    mobile: 'M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z',
+    desktop: 'M20 16V7a2 2 0 00-2-2H6a2 2 0 00-2 2v9m16 0H4m16 0l1.28 2.55a1 1 0 01-.9 1.45H3.62a1 1 0 01-.9-1.45L4 16',
+    calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z',
+    alert: 'M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0zM12 9v4M12 17h.01',
+    user: 'M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8z'
+  };
+  return /*#__PURE__*/React.createElement("svg", {
+    xmlns: "http://www.w3.org/2000/svg",
+    width: size,
+    height: size,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round",
+    strokeLinejoin: "round",
+    className: cls
+  }, /*#__PURE__*/React.createElement("path", {
+    d: paths[name] || paths.alert
+  }));
+};
+
+// ============================================================
+// UTILITIES
+// ============================================================
+const scoreColor = s => s >= 70 ? 'text-green-600' : s >= 40 ? 'text-orange-500' : 'text-gray-400';
+const scoreBg = s => s >= 70 ? 'bg-green-100' : s >= 40 ? 'bg-orange-100' : 'bg-gray-100';
+const scoreLabel = s => s >= 70 ? 'Hot 🔥' : s >= 40 ? 'Warm 🌡' : 'Cold ❄️';
+const statusBadge = s => ({
+  active: 'bg-green-100 text-green-700',
+  completed: 'bg-blue-100 text-blue-700',
+  draft: 'bg-gray-100 text-gray-600',
+  paused: 'bg-orange-100 text-orange-700'
+})[s] || 'bg-gray-100 text-gray-600';
+const statusLabel = s => ({
+  active: 'Aktywna',
+  completed: 'Zakończona',
+  draft: 'Szkic',
+  paused: 'Wstrzymana'
+})[s] || s;
+const pct = (a, b) => b ? Math.round(a / b * 100) : 0;
+const avatar = (fn, ln, size = 'w-8 h-8') => /*#__PURE__*/React.createElement("div", {
+  className: `${size} rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold flex-shrink-0`
+}, fn[0], ln[0]);
+const Badge = ({
+  label,
+  color = 'blue'
+}) => /*#__PURE__*/React.createElement("span", {
+  className: `px-2 py-0.5 rounded text-xs font-medium bg-${color}-100 text-${color}-700`
+}, label);
+const TagPill = ({
+  tag
+}) => /*#__PURE__*/React.createElement("span", {
+  className: "px-1.5 py-0.5 bg-slate-100 text-slate-600 rounded text-xs"
+}, tag);
+
+// ============================================================
+// CAMPAIGN WIZARD
+// ============================================================
+const SEGMENTS = ['all', 'vip', 'newsletter', 'promo', 'webinar', 'cold'];
+const CampaignWizard = ({
+  onClose,
+  onSave
+}) => {
+  const [step, setStep] = useState(1);
+  const [form, setForm] = useState({
+    name: '',
+    subject: '',
+    from: '',
+    replyTo: '',
+    segment: 'all',
+    content: '',
+    template: null,
+    scheduleType: 'now',
+    scheduleDate: '',
+    scheduleTime: ''
+  });
+  const [err, setErr] = useState('');
+  const up = k => v => setForm(f => ({
+    ...f,
+    [k]: v
+  }));
+  const validate = () => {
+    if (step === 1) {
+      if (!form.name || !form.subject || !form.from) {
+        setErr('Uzupełnij wszystkie pola');
+        return false;
+      }
+    }
+    if (step === 2) {
+      if (!form.segment) {
+        setErr('Wybierz segment');
+        return false;
+      }
+    }
+    if (step === 3) {
+      if (!form.content) {
+        setErr('Dodaj treść wiadomości');
+        return false;
+      }
+    }
+    setErr('');
+    return true;
+  };
+  const next = () => {
+    if (validate()) setStep(s => s + 1);
+  };
+  const save = () => {
+    if (!validate()) return;
+    onSave({
+      ...form,
+      id: Date.now(),
+      status: 'draft',
+      sent: 0,
+      opened: 0,
+      clicked: 0,
+      date: new Date().toISOString().slice(0, 10),
+      progress: 0
+    });
+  };
+  const steps = ['Podstawowe info', 'Odbiorcy', 'Treść', 'Harmonogram'];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl w-[680px] max-h-[90vh] overflow-hidden shadow-2xl flex flex-col"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "p-6 border-b flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Nowa kampania"), /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-gray-500 mt-1"
+  }, "Krok ", step, " z 4 \u2014 ", steps[step - 1])), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "p-2 hover:bg-gray-100 rounded-lg"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "x",
+    size: 20
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "px-6 pt-4 flex gap-2"
+  }, steps.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex-1"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `h-2 rounded-full ${i + 1 <= step ? 'bg-blue-600' : 'bg-gray-200'}`
+  }), /*#__PURE__*/React.createElement("p", {
+    className: `text-xs mt-1 ${i + 1 === step ? 'text-blue-600 font-medium' : 'text-gray-400'}`
+  }, s)))), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 overflow-y-auto p-6"
+  }, step === 1 && /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Nazwa kampanii *"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: form.name,
+    onChange: e => up('name')(e.target.value),
+    placeholder: "np. Wiosenna Promocja 2026"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Temat wiadomo\u015Bci *"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: form.subject,
+    onChange: e => up('subject')(e.target.value),
+    placeholder: "np. Oferta specjalna tylko dla Ciebie!"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Nadawca *"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: form.from,
+    onChange: e => up('from')(e.target.value),
+    placeholder: "np. Jan Kowalski"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Reply-To"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    value: form.replyTo,
+    onChange: e => up('replyTo')(e.target.value),
+    placeholder: "np. kontakt@firma.pl"
+  }))), step === 2 && /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-gray-600"
+  }, "Wybierz segment odbiorc\xF3w:"), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-3"
+  }, SEGMENTS.map(seg => {
+    const count = seg === 'all' ? CONTACTS.length : CONTACTS.filter(c => c.tags.includes(seg)).length;
+    return /*#__PURE__*/React.createElement("button", {
+      key: seg,
+      onClick: () => up('segment')(seg),
+      className: `p-4 rounded-xl border-2 text-left transition-all ${form.segment === seg ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "font-semibold text-gray-800 capitalize"
+    }, seg === 'all' ? 'Wszyscy' : seg), /*#__PURE__*/React.createElement("div", {
+      className: "text-sm text-gray-500 mt-1"
+    }, count, " kontakt\xF3w"));
+  }))), step === 3 && /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Szybki wyb\xF3r szablonu"), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-4 gap-2 mb-4"
+  }, TEMPLATES.slice(0, 4).map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    onClick: () => up('template')(t.id),
+    className: `rounded-lg border-2 overflow-hidden cursor-pointer transition-all ${form.template === t.id ? 'border-blue-600' : 'border-gray-200'}`
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: t.color
+    },
+    className: "h-16 flex items-center justify-center text-white text-xs font-bold p-2 text-center"
+  }, t.name), /*#__PURE__*/React.createElement("div", {
+    className: "p-1 text-center text-xs text-gray-500"
+  }, t.cat))))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Tre\u015B\u0107 wiadomo\u015Bci *"), /*#__PURE__*/React.createElement("textarea", {
+    className: "input min-h-[160px] resize-none",
+    value: form.content,
+    onChange: e => up('content')(e.target.value),
+    placeholder: "Wpisz tre\u015B\u0107 swojego maila..."
+  }))), step === 4 && /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-4"
+  }, [['now', 'Wyślij teraz', 'Wiadomość zostanie wysłana natychmiast'], ['scheduled', 'Zaplanuj datę', 'Wybierz termin wysyłki']].map(([val, lbl, desc]) => /*#__PURE__*/React.createElement("button", {
+    key: val,
+    onClick: () => up('scheduleType')(val),
+    className: `p-4 rounded-xl border-2 text-left ${form.scheduleType === val ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-gray-800"
+  }, lbl), /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-gray-500 mt-1"
+  }, desc)))), form.scheduleType === 'scheduled' && /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Data"), /*#__PURE__*/React.createElement("input", {
+    type: "date",
+    className: "input",
+    value: form.scheduleDate,
+    onChange: e => up('scheduleDate')(e.target.value)
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Godzina"), /*#__PURE__*/React.createElement("input", {
+    type: "time",
+    className: "input",
+    value: form.scheduleTime,
+    onChange: e => up('scheduleTime')(e.target.value)
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "bg-blue-50 rounded-xl p-4 space-y-2 text-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-blue-900"
+  }, "Podsumowanie kampanii"), /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-600"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Nazwa:"), " ", form.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-600"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Temat:"), " ", form.subject), /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-600"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium"
+  }, "Segment:"), " ", form.segment, " (", form.segment === 'all' ? CONTACTS.length : CONTACTS.filter(c => c.tags.includes(form.segment)).length, " kontakt\xF3w)"))), err && /*#__PURE__*/React.createElement("div", {
+    className: "mt-3 text-red-600 text-sm flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "alert",
+    size: 14
+  }), err)), /*#__PURE__*/React.createElement("div", {
+    className: "p-6 border-t flex justify-between"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => step > 1 ? setStep(s => s - 1) : onClose,
+    className: "btn-secondary flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "arrleft",
+    size: 16
+  }), step > 1 ? 'Wstecz' : 'Anuluj'), step < 4 ? /*#__PURE__*/React.createElement("button", {
+    onClick: next,
+    className: "btn-primary flex items-center gap-2"
+  }, "Dalej ", /*#__PURE__*/React.createElement(Ic, {
+    name: "chevright",
+    size: 16
+  })) : /*#__PURE__*/React.createElement("button", {
+    onClick: save,
+    className: "btn-primary flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "send",
+    size: 16
+  }), "Zapisz kampani\u0119"))));
+};
+
+// ============================================================
+// SVG CHARTS (replaces Recharts)
+// ============================================================
+const SimpleAreaChart = ({
+  data
+}) => {
+  const W = 560,
+    H = 180,
+    pl = 40,
+    pr = 10,
+    pt = 10,
+    pb = 30;
+  const cW = W - pl - pr,
+    cH = H - pt - pb;
+  const maxV = Math.max(...data.map(d => d.sent)) || 1;
+  const x = i => pl + i * (cW / (data.length - 1));
+  const y = v => pt + cH - v / maxV * cH;
+  const line = key => data.map((d, i) => x(i) + ',' + y(d[key])).join(' ');
+  const area = key => {
+    const pts = data.map((d, i) => x(i) + ',' + y(d[key])).join(' ');
+    return pts + ' ' + x(data.length - 1) + ',' + (pt + cH) + ' ' + x(0) + ',' + (pt + cH);
+  };
+  const labels = [{
+    k: 'sent',
+    c: '#185FA5',
+    n: 'Wysłano'
+  }, {
+    k: 'opened',
+    c: '#16a34a',
+    n: 'Otwarto'
+  }, {
+    k: 'clicked',
+    c: '#f59e0b',
+    n: 'Kliknięto'
+  }];
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 " + W + " " + H,
+    style: {
+      width: '100%',
+      height: H + 'px'
+    }
+  }, /*#__PURE__*/React.createElement("defs", null, labels.slice(0, 2).map(({
+    k,
+    c
+  }) => /*#__PURE__*/React.createElement("linearGradient", {
+    key: k,
+    id: "g" + k,
+    x1: "0",
+    y1: "0",
+    x2: "0",
+    y2: "1"
+  }, /*#__PURE__*/React.createElement("stop", {
+    offset: "5%",
+    stopColor: c,
+    stopOpacity: "0.2"
+  }), /*#__PURE__*/React.createElement("stop", {
+    offset: "95%",
+    stopColor: c,
+    stopOpacity: "0"
+  })))), [0.25, 0.5, 0.75, 1].map((p, i) => /*#__PURE__*/React.createElement("line", {
+    key: i,
+    x1: pl,
+    x2: W - pr,
+    y1: y(maxV * p),
+    y2: y(maxV * p),
+    stroke: "#f0f0f0",
+    strokeWidth: "1"
+  })), labels.slice(0, 2).map(({
+    k
+  }) => /*#__PURE__*/React.createElement("polygon", {
+    key: k,
+    points: area(k),
+    fill: "url(#g" + k + ")",
+    opacity: "0.6"
+  })), labels.map(({
+    k,
+    c
+  }, i) => /*#__PURE__*/React.createElement("polyline", {
+    key: k,
+    points: line(k),
+    fill: "none",
+    stroke: c,
+    strokeWidth: "2",
+    strokeDasharray: i === 2 ? "4 4" : undefined
+  })), data.map((d, i) => /*#__PURE__*/React.createElement("text", {
+    key: i,
+    x: x(i),
+    y: H - 8,
+    textAnchor: "middle",
+    fontSize: "11",
+    fill: "#94a3b8"
+  }, d.day)), labels.map(({
+    c,
+    n
+  }, i) => /*#__PURE__*/React.createElement("g", {
+    key: i,
+    transform: "translate(" + (W - 190 + i * 65) + ",6)"
+  }, /*#__PURE__*/React.createElement("circle", {
+    r: "4",
+    cx: "4",
+    cy: "4",
+    fill: c
+  }), /*#__PURE__*/React.createElement("text", {
+    x: "11",
+    y: "8",
+    fontSize: "10",
+    fill: "#64748b"
+  }, n))));
+};
+const SimpleBarChart = ({
+  data
+}) => {
+  const W = 640,
+    H = 130,
+    pl = 30,
+    pr = 10,
+    pt = 10,
+    pb = 25;
+  const cW = W - pl - pr,
+    cH = H - pt - pb;
+  const maxV = Math.max(...data.map(d => d.opens)) || 1;
+  const gap = cW / data.length;
+  const bW = Math.max(4, gap * 0.7);
+  return /*#__PURE__*/React.createElement("svg", {
+    viewBox: "0 0 " + W + " " + H,
+    style: {
+      width: '100%',
+      height: H + 'px'
+    }
+  }, [0.25, 0.5, 0.75, 1].map((p, i) => /*#__PURE__*/React.createElement("line", {
+    key: i,
+    x1: pl,
+    x2: W - pr,
+    y1: pt + cH - p * cH,
+    y2: pt + cH - p * cH,
+    stroke: "#f0f0f0"
+  })), data.map((d, i) => {
+    const bH = Math.max(2, d.opens / maxV * cH);
+    const bX = pl + i * gap + (gap - bW) / 2;
+    return /*#__PURE__*/React.createElement("g", {
+      key: i
+    }, /*#__PURE__*/React.createElement("rect", {
+      x: bX,
+      y: pt + cH - bH,
+      width: bW,
+      height: bH,
+      fill: "#185FA5",
+      rx: "3",
+      opacity: "0.85"
+    }), /*#__PURE__*/React.createElement("text", {
+      x: bX + bW / 2,
+      y: H - 7,
+      textAnchor: "middle",
+      fontSize: "9",
+      fill: "#94a3b8"
+    }, d.hour));
+  }));
+};
+
+// ============================================================
+// DASHBOARD
+// ============================================================
+const Dashboard = ({
+  campaigns,
+  contacts
+}) => {
+  const totalSent = campaigns.reduce((a, c) => a + c.sent, 0);
+  const totalOpened = campaigns.reduce((a, c) => a + c.opened, 0);
+  const totalClicked = campaigns.reduce((a, c) => a + c.clicked, 0);
+  const hotLeads = contacts.filter(c => c.score >= 70).length;
+  const stats = [{
+    label: 'Wysłane maile',
+    value: totalSent.toLocaleString('pl-PL'),
+    icon: 'send',
+    color: 'blue'
+  }, {
+    label: 'Open Rate',
+    value: pct(totalOpened, totalSent) + '%',
+    icon: 'eye',
+    color: 'green'
+  }, {
+    label: 'CTR',
+    value: pct(totalClicked, totalOpened) + '%',
+    icon: 'trending',
+    color: 'orange'
+  }, {
+    label: 'Hot Leady',
+    value: hotLeads,
+    icon: 'zap',
+    color: 'purple'
+  }];
+  const funnelData = [{
+    name: 'Wysłano',
+    value: totalSent,
+    color: '#185FA5'
+  }, {
+    name: 'Odczytano',
+    value: totalOpened,
+    color: '#16a34a'
+  }, {
+    name: 'Kliknięto',
+    value: totalClicked,
+    color: '#f59e0b'
+  }, {
+    name: 'Lead',
+    value: Math.floor(totalClicked * 0.4),
+    color: '#8b5cf6'
+  }, {
+    name: 'Konwersja',
+    value: Math.floor(totalClicked * 0.15),
+    color: '#ec4899'
+  }];
+  const colorMap = {
+    blue: 'bg-blue-100 text-blue-600',
+    green: 'bg-green-100 text-green-600',
+    orange: 'bg-orange-100 text-orange-600',
+    purple: 'bg-purple-100 text-purple-600'
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-6 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-4 gap-4"
+  }, stats.map((s, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `w-10 h-10 rounded-xl flex items-center justify-center ${colorMap[s.color]}`
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: s.icon,
+    size: 20
+  })), /*#__PURE__*/React.createElement("span", {
+    className: "text-xs text-gray-400"
+  }, s.label)), /*#__PURE__*/React.createElement("div", {
+    className: "text-3xl font-bold text-gray-900"
+  }, s.value)))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-3 gap-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "col-span-2 bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-800 mb-4"
+  }, "Aktywno\u015B\u0107 wysy\u0142ek \u2014 ostatnie 7 dni"), /*#__PURE__*/React.createElement(SimpleAreaChart, {
+    data: WEEK_DATA
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-800 mb-4"
+  }, "Lejek sprzeda\u017Cowy"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3"
+  }, funnelData.map((f, i) => /*#__PURE__*/React.createElement("div", {
+    key: i
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between text-sm mb-1"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-gray-600"
+  }, f.name), /*#__PURE__*/React.createElement("span", {
+    className: "font-semibold"
+  }, f.value.toLocaleString('pl-PL'))), /*#__PURE__*/React.createElement("div", {
+    className: "h-2 bg-gray-100 rounded-full overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full rounded-full transition-all",
+    style: {
+      width: `${Math.max(4, pct(f.value, totalSent))}%`,
+      background: f.color
+    }
+  }))))))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-2 gap-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-800 mb-4"
+  }, "Ostatnie odczyty maili"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3"
+  }, OPENS.slice(0, 5).map(o => /*#__PURE__*/React.createElement("div", {
+    key: o.id,
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold flex-shrink-0"
+  }, o.name.split(' ').map(n => n[0]).join('')), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 min-w-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-medium text-gray-800 truncate"
+  }, o.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400 truncate"
+  }, o.campaign)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right flex-shrink-0"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-600"
+  }, o.time), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400"
+  }, o.date)))))), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-800 mb-4"
+  }, "Aktywne kampanie"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3"
+  }, campaigns.filter(c => c.status === 'active').map(c => /*#__PURE__*/React.createElement("div", {
+    key: c.id
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between text-sm mb-1"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "font-medium text-gray-800 truncate"
+  }, c.name), /*#__PURE__*/React.createElement("span", {
+    className: "text-gray-500"
+  }, pct(c.opened, c.sent), "% OR")), /*#__PURE__*/React.createElement("div", {
+    className: "h-2 bg-gray-100 rounded-full overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full bg-blue-500 rounded-full",
+    style: {
+      width: `${c.progress}%`
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400 mt-1"
+  }, "Wys\u0142ano: ", c.sent.toLocaleString('pl-PL'), " \xB7 Klikni\u0119to: ", c.clicked)))))));
+};
+
+// ============================================================
+// CAMPAIGNS VIEW
+// ============================================================
+const Campaigns = ({
+  campaigns,
+  setCampaigns
+}) => {
+  const [showWizard, setShowWizard] = useState(false);
+  const saveCampaign = camp => {
+    setCampaigns(cs => [...cs, camp]);
+    setShowWizard(false);
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Kampanie e-mail"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary flex items-center gap-2",
+    onClick: () => setShowWizard(true)
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "plus",
+    size: 16
+  }), "Nowa kampania")), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "bg-gray-50 border-b border-gray-100"
+  }, /*#__PURE__*/React.createElement("tr", null, ['Kampania', 'Status', 'Wysłano', 'Open Rate', 'CTR', 'Kliknięto', 'Data', 'Akcje'].map(h => /*#__PURE__*/React.createElement("th", {
+    key: h,
+    className: "px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
+  }, h)))), /*#__PURE__*/React.createElement("tbody", {
+    className: "divide-y divide-gray-50"
+  }, campaigns.map(c => /*#__PURE__*/React.createElement("tr", {
+    key: c.id,
+    className: "hover:bg-gray-50 transition-colors"
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-gray-900"
+  }, c.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400 mt-0.5"
+  }, c.subject)), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-1 rounded-lg text-xs font-semibold ${statusBadge(c.status)}`
+  }, statusLabel(c.status))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4 text-sm text-gray-700"
+  }, c.sent.toLocaleString('pl-PL')), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold text-gray-800"
+  }, pct(c.opened, c.sent), "%"), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 h-1.5 w-20 bg-gray-100 rounded-full"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full bg-blue-500 rounded-full",
+    style: {
+      width: `${pct(c.opened, c.sent)}%`
+    }
+  }))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold text-gray-800"
+  }, pct(c.clicked, c.opened), "%"), /*#__PURE__*/React.createElement("div", {
+    className: "mt-1 h-1.5 w-20 bg-gray-100 rounded-full"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full bg-green-500 rounded-full",
+    style: {
+      width: `${pct(c.clicked, c.opened)}%`
+    }
+  }))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4 text-sm text-gray-700"
+  }, c.clicked), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4 text-sm text-gray-500"
+  }, c.date), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "p-1.5 hover:bg-blue-50 hover:text-blue-600 rounded transition-colors text-gray-400"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "edit",
+    size: 14
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "p-1.5 hover:bg-red-50 hover:text-red-600 rounded transition-colors text-gray-400"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "trash",
+    size: 14
+  }))))))))), showWizard && /*#__PURE__*/React.createElement(CampaignWizard, {
+    onClose: () => setShowWizard(false),
+    onSave: saveCampaign
+  }));
+};
+
+// ============================================================
+// AUTOMATIONS
+// ============================================================
+const NodeColors = {
+  trigger: 'bg-blue-600',
+  action: 'bg-green-600',
+  condition: 'bg-orange-500',
+  wait: 'bg-purple-500',
+  end: 'bg-gray-400'
+};
+const NodeIcons = {
+  trigger: 'zap',
+  action: 'mail',
+  condition: 'alert',
+  wait: 'clock',
+  end: 'check'
+};
+const AutomationFlow = ({
+  steps
+}) => /*#__PURE__*/React.createElement("div", {
+  className: "flex items-start gap-0 overflow-x-auto pb-4"
+}, steps.map((s, i) => /*#__PURE__*/React.createElement("div", {
+  key: s.id,
+  className: "flex items-center"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "flex flex-col items-center"
+}, /*#__PURE__*/React.createElement("div", {
+  className: `w-10 h-10 rounded-xl ${NodeColors[s.type]} flex items-center justify-center text-white shadow-md`
+}, /*#__PURE__*/React.createElement(Ic, {
+  name: NodeIcons[s.type] || 'mail',
+  size: 16
+})), /*#__PURE__*/React.createElement("div", {
+  className: `mt-2 px-3 py-1.5 rounded-lg text-xs font-medium text-center max-w-[110px] ${s.type === 'trigger' ? 'bg-blue-50 text-blue-700' : s.type === 'condition' ? 'bg-orange-50 text-orange-700' : s.type === 'wait' ? 'bg-purple-50 text-purple-700' : s.type === 'end' ? 'bg-gray-100 text-gray-600' : 'bg-green-50 text-green-700'}`
+}, s.label), /*#__PURE__*/React.createElement("div", {
+  className: "text-xs text-gray-400 mt-1"
+}, s.count, " kontakt\xF3w"), s.type === 'condition' && /*#__PURE__*/React.createElement("div", {
+  className: "flex gap-4 text-xs mt-1"
+}, /*#__PURE__*/React.createElement("span", {
+  className: "text-green-600"
+}, "\u2713 ", s.yes), /*#__PURE__*/React.createElement("span", {
+  className: "text-red-500"
+}, "\u2717 ", s.no))), i < steps.length - 1 && /*#__PURE__*/React.createElement("div", {
+  className: "w-8 flex-shrink-0 flex items-start justify-center mt-4"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "h-0.5 w-full bg-gray-200 relative"
+}, /*#__PURE__*/React.createElement("div", {
+  className: "absolute right-0 top-1/2 -translate-y-1/2 text-gray-400"
+}, "\u25B6"))))));
+const Automations = () => {
+  const [selected, setSelected] = useState(null);
+  const [showNew, setShowNew] = useState(false);
+  const triggers = ['Rejestracja w sklepie', 'Odczyt maila', 'Kliknięcie w link', 'Porzucony koszyk', 'Brak aktywności 30 dni'];
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Automatyzacje"), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary flex items-center gap-2",
+    onClick: () => setShowNew(true)
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "plus",
+    size: 16
+  }), "Nowa automatyzacja")), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, AUTOMATIONS.map(a => /*#__PURE__*/React.createElement("div", {
+    key: a.id,
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `w-10 h-10 rounded-xl ${a.status === 'active' ? 'bg-green-100' : 'bg-orange-100'} flex items-center justify-center`
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "zap",
+    size: 18,
+    cls: a.status === 'active' ? 'text-green-600' : 'text-orange-500'
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-gray-900"
+  }, a.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-500 mt-0.5"
+  }, "Trigger: ", a.trigger))), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-right text-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-500"
+  }, "Aktywni"), /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-gray-900"
+  }, a.active)), /*#__PURE__*/React.createElement("div", {
+    className: "text-right text-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "text-gray-500"
+  }, "\u0141\u0105cznie"), /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-gray-900"
+  }, a.total)), /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-1 rounded-lg text-xs font-semibold ${a.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`
+  }, a.status === 'active' ? 'Aktywna' : 'Wstrzymana'), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setSelected(selected === a.id ? null : a.id),
+    className: "p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: selected === a.id ? 'chevdown' : 'chevright',
+    size: 16
+  })))), selected === a.id && /*#__PURE__*/React.createElement("div", {
+    className: "pt-4 border-t border-gray-100"
+  }, /*#__PURE__*/React.createElement(AutomationFlow, {
+    steps: a.steps
+  }))))), showNew && /*#__PURE__*/React.createElement("div", {
+    className: "fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl w-[500px] p-6 shadow-2xl"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-5"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "text-lg font-bold"
+  }, "Nowa automatyzacja"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(false),
+    className: "p-1.5 hover:bg-gray-100 rounded"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "x",
+    size: 18
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-4"
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Nazwa automatyzacji"), /*#__PURE__*/React.createElement("input", {
+    className: "input",
+    placeholder: "np. Onboarding VIP"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    className: "label"
+  }, "Trigger (wyzwalacz)"), /*#__PURE__*/React.createElement("select", {
+    className: "input"
+  }, triggers.map(t => /*#__PURE__*/React.createElement("option", {
+    key: t
+  }, t)))), /*#__PURE__*/React.createElement("div", {
+    className: "bg-blue-50 rounded-xl p-4"
+  }, /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-blue-700"
+  }, "Po wybraniu triggera mo\u017Cesz dodawa\u0107 kroki: wy\u015Blij mail, czekaj N dni, sprawd\u017A warunek, dodaj tag, zmie\u0144 scoring."))), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-end gap-3 mt-6"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(false),
+    className: "btn-secondary"
+  }, "Anuluj"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setShowNew(false),
+    className: "btn-primary"
+  }, "Utw\xF3rz i edytuj")))));
+};
+
+// ============================================================
+// CONTACT DRAWER
+// ============================================================
+const ContactDrawer = ({
+  contact,
+  onClose
+}) => {
+  if (!contact) return null;
+  const hist = HISTORY[contact.id] || [];
+  const s = contact.score;
+  return /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+    className: "drawer-overlay",
+    onClick: onClose
+  }), /*#__PURE__*/React.createElement("div", {
+    className: "drawer open"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "p-5 border-b flex items-center justify-between sticky top-0 bg-white z-10"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-lg font-bold"
+  }, contact.fn[0], contact.ln[0]), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "font-bold text-gray-900 text-lg"
+  }, contact.fn, " ", contact.ln), /*#__PURE__*/React.createElement("div", {
+    className: "text-sm text-gray-500"
+  }, contact.company))), /*#__PURE__*/React.createElement("button", {
+    onClick: onClose,
+    className: "p-2 hover:bg-gray-100 rounded-lg"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "x",
+    size: 18
+  }))), /*#__PURE__*/React.createElement("div", {
+    className: "p-5 space-y-5"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "bg-gray-50 rounded-xl p-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between mb-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-sm font-semibold text-gray-700"
+  }, "Lead Score"), /*#__PURE__*/React.createElement("span", {
+    className: `text-sm font-bold ${scoreColor(s)}`
+  }, scoreLabel(s))), /*#__PURE__*/React.createElement("div", {
+    className: "h-3 bg-gray-200 rounded-full overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full rounded-full transition-all",
+    style: {
+      width: `${s}%`,
+      background: s >= 70 ? '#16a34a' : s >= 40 ? '#f59e0b' : '#94a3b8'
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex justify-between text-xs text-gray-400 mt-1"
+  }, /*#__PURE__*/React.createElement("span", null, "0"), /*#__PURE__*/React.createElement("span", {
+    className: "font-bold text-gray-700"
+  }, s, "/100"), /*#__PURE__*/React.createElement("span", null, "100"))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold text-gray-700 mb-3"
+  }, "Dane kontaktu"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-2.5 text-sm"
+  }, [[/*#__PURE__*/React.createElement(Ic, {
+    name: "mail",
+    size: 14
+  }), contact.email], [/*#__PURE__*/React.createElement(Ic, {
+    name: "phone",
+    size: 14
+  }), contact.phone], [/*#__PURE__*/React.createElement(Ic, {
+    name: "globe",
+    size: 14
+  }), contact.city], [/*#__PURE__*/React.createElement(Ic, {
+    name: "calendar",
+    size: 14
+  }), 'Ostatnia aktywność: ' + contact.lastActivity]].map(([ico, val], i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-center gap-2 text-gray-700"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "text-gray-400"
+  }, ico), val)))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold text-gray-700 mb-2"
+  }, "Tagi"), /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-2"
+  }, contact.tags.map(t => /*#__PURE__*/React.createElement(TagPill, {
+    key: t,
+    tag: t
+  })))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-semibold text-gray-700 mb-3"
+  }, "Historia aktywno\u015Bci"), hist.length ? /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3"
+  }, hist.map((h, i) => /*#__PURE__*/React.createElement("div", {
+    key: i,
+    className: "flex items-start gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `mt-0.5 w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 ${h.type === 'open' ? 'bg-blue-100 text-blue-600' : 'bg-green-100 text-green-600'}`
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: h.type === 'open' ? 'eye' : 'check',
+    size: 12
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-sm font-medium text-gray-800"
+  }, h.type === 'open' ? 'Otworzył mail' : 'Kliknął w link'), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-500"
+  }, h.campaign), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400"
+  }, h.date, " \xB7 ", h.device))))) : /*#__PURE__*/React.createElement("p", {
+    className: "text-sm text-gray-400"
+  }, "Brak historii aktywno\u015Bci")))));
+};
+
+// ============================================================
+// CONTACTS VIEW
+// ============================================================
+const Contacts = () => {
+  const [search, setSearch] = useState('');
+  const [tagFilter, setTagFilter] = useState('');
+  const [scoreFilter, setScoreFilter] = useState('');
+  const [selected, setSelected] = useState(null);
+  const allTags = [...new Set(CONTACTS.flatMap(c => c.tags))].sort();
+  const filtered = CONTACTS.filter(c => {
+    if (search && !`${c.fn} ${c.ln} ${c.email} ${c.company}`.toLowerCase().includes(search.toLowerCase())) return false;
+    if (tagFilter && !c.tags.includes(tagFilter)) return false;
+    if (scoreFilter === 'hot' && c.score < 70) return false;
+    if (scoreFilter === 'warm' && (c.score < 40 || c.score >= 70)) return false;
+    if (scoreFilter === 'cold' && c.score >= 40) return false;
+    return true;
+  });
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Kontakty ", /*#__PURE__*/React.createElement("span", {
+    className: "text-gray-400 font-normal text-base"
+  }, "(", CONTACTS.length, ")")), /*#__PURE__*/React.createElement("button", {
+    className: "btn-primary flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "plus",
+    size: 16
+  }), "Dodaj kontakt")), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-3 items-center bg-white rounded-xl p-3 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "relative flex-1"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "search",
+    size: 16,
+    cls: "absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+  }), /*#__PURE__*/React.createElement("input", {
+    className: "w-full pl-9 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500",
+    placeholder: "Szukaj kontaktu...",
+    value: search,
+    onChange: e => setSearch(e.target.value)
+  })), /*#__PURE__*/React.createElement("select", {
+    value: tagFilter,
+    onChange: e => setTagFilter(e.target.value),
+    className: "px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Wszystkie tagi"), allTags.map(t => /*#__PURE__*/React.createElement("option", {
+    key: t
+  }, t))), /*#__PURE__*/React.createElement("select", {
+    value: scoreFilter,
+    onChange: e => setScoreFilter(e.target.value),
+    className: "px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-500 bg-white"
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Wszystkie leady"), /*#__PURE__*/React.createElement("option", {
+    value: "hot"
+  }, "Hot \uD83D\uDD25 (>70)"), /*#__PURE__*/React.createElement("option", {
+    value: "warm"
+  }, "Warm \uD83C\uDF21 (40-70)"), /*#__PURE__*/React.createElement("option", {
+    value: "cold"
+  }, "Cold \u2744\uFE0F (<40)")), (search || tagFilter || scoreFilter) && /*#__PURE__*/React.createElement("button", {
+    onClick: () => {
+      setSearch('');
+      setTagFilter('');
+      setScoreFilter('');
+    },
+    className: "text-sm text-gray-500 hover:text-red-500 px-2"
+  }, "\u2715 Wyczy\u015B\u0107")), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "bg-gray-50 border-b border-gray-100"
+  }, /*#__PURE__*/React.createElement("tr", null, ['Kontakt', 'Email', 'Tagi', 'Lead Score', 'Ostatnia aktywność', ''].map(h => /*#__PURE__*/React.createElement("th", {
+    key: h,
+    className: "px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
+  }, h)))), /*#__PURE__*/React.createElement("tbody", {
+    className: "divide-y divide-gray-50"
+  }, filtered.map(c => /*#__PURE__*/React.createElement("tr", {
+    key: c.id,
+    className: "hover:bg-gray-50 cursor-pointer transition-colors",
+    onClick: () => setSelected(c)
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-9 h-9 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold"
+  }, c.fn[0], c.ln[0]), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "font-medium text-gray-900 text-sm"
+  }, c.fn, " ", c.ln), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-400"
+  }, c.company)))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-sm text-gray-600"
+  }, c.email), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex flex-wrap gap-1"
+  }, c.tags.map(t => /*#__PURE__*/React.createElement(TagPill, {
+    key: t,
+    tag: t
+  })))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-16 h-2 bg-gray-100 rounded-full overflow-hidden"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "h-full rounded-full",
+    style: {
+      width: `${c.score}%`,
+      background: c.score >= 70 ? '#16a34a' : c.score >= 40 ? '#f59e0b' : '#94a3b8'
+    }
+  })), /*#__PURE__*/React.createElement("span", {
+    className: `text-sm font-bold ${scoreColor(c.score)}`
+  }, c.score)), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs mt-0.5"
+  }, scoreLabel(c.score))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-sm text-gray-500"
+  }, c.lastActivity), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-right"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "chevright",
+    size: 16,
+    cls: "text-gray-300"
+  })))))), !filtered.length && /*#__PURE__*/React.createElement("div", {
+    className: "text-center py-10 text-gray-400"
+  }, "Brak kontakt\xF3w spe\u0142niaj\u0105cych kryteria")), /*#__PURE__*/React.createElement(ContactDrawer, {
+    contact: selected,
+    onClose: () => setSelected(null)
+  }));
+};
+
+// ============================================================
+// EMAIL OPENS VIEW
+// ============================================================
+const EmailOpens = () => {
+  const [campFilter, setCampFilter] = useState('');
+  const camps = [...new Set(OPENS.map(o => o.campaign))];
+  const filtered = campFilter ? OPENS.filter(o => o.campaign === campFilter) : OPENS;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Odczyty maili"), /*#__PURE__*/React.createElement("select", {
+    value: campFilter,
+    onChange: e => setCampFilter(e.target.value),
+    className: "px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:outline-none focus:border-blue-500"
+  }, /*#__PURE__*/React.createElement("option", {
+    value: ""
+  }, "Wszystkie kampanie"), camps.map(c => /*#__PURE__*/React.createElement("option", {
+    key: c
+  }, c)))), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-800 mb-4"
+  }, "Aktywno\u015B\u0107 odczyt\xF3w per godzina dnia"), /*#__PURE__*/React.createElement(SimpleBarChart, {
+    data: HOUR_DATA.filter((_, i) => i % 2 === 0)
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden"
+  }, /*#__PURE__*/React.createElement("table", {
+    className: "w-full"
+  }, /*#__PURE__*/React.createElement("thead", {
+    className: "bg-gray-50 border-b border-gray-100"
+  }, /*#__PURE__*/React.createElement("tr", null, ['Kontakt', 'Kampania', 'Data i godzina', 'Urządzenie', 'Miasto', 'Odczytów'].map(h => /*#__PURE__*/React.createElement("th", {
+    key: h,
+    className: "px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide"
+  }, h)))), /*#__PURE__*/React.createElement("tbody", {
+    className: "divide-y divide-gray-50"
+  }, filtered.map(o => /*#__PURE__*/React.createElement("tr", {
+    key: o.id,
+    className: "hover:bg-gray-50"
+  }, /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold"
+  }, o.name.split(' ').map(n => n[0]).join('')), /*#__PURE__*/React.createElement("span", {
+    className: "text-sm font-medium text-gray-800"
+  }, o.name))), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-sm text-gray-600"
+  }, o.campaign), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-sm text-gray-600"
+  }, o.date, " ", o.time), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-1.5 text-sm text-gray-600"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: o.device === 'mobile' ? 'mobile' : 'desktop',
+    size: 14,
+    cls: "text-gray-400"
+  }), o.device === 'mobile' ? 'Mobile' : 'Desktop')), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3 text-sm text-gray-600"
+  }, o.city), /*#__PURE__*/React.createElement("td", {
+    className: "px-4 py-3"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: "px-2 py-1 bg-blue-100 text-blue-700 rounded-lg text-xs font-semibold"
+  }, o.count, "\xD7"))))))));
+};
+
+// ============================================================
+// FUNNEL / SCORING (KANBAN)
+// ============================================================
+const COLS = [{
+  id: 'cold',
+  label: 'Cold ❄️',
+  color: 'text-gray-500',
+  bg: 'bg-gray-50',
+  border: 'border-gray-200'
+}, {
+  id: 'warm',
+  label: 'Warm 🌡',
+  color: 'text-orange-500',
+  bg: 'bg-orange-50',
+  border: 'border-orange-200'
+}, {
+  id: 'hot',
+  label: 'Hot 🔥',
+  color: 'text-green-600',
+  bg: 'bg-green-50',
+  border: 'border-green-200'
+}, {
+  id: 'client',
+  label: 'Klient ✅',
+  color: 'text-blue-600',
+  bg: 'bg-blue-50',
+  border: 'border-blue-200'
+}];
+const Scoring = () => {
+  const [contacts, setContacts] = useState(CONTACTS.map(c => ({
+    ...c
+  })));
+  const [rules, setRules] = useState(SCORING_RULES);
+  const [editRule, setEditRule] = useState(null);
+  const [activeTab, setActiveTab] = useState('kanban');
+  const getCol = c => c.score >= 90 ? 'client' : c.score >= 70 ? 'hot' : c.score >= 40 ? 'warm' : 'cold';
+  const moveContact = (id, toCol) => setContacts(cs => cs.map(c => {
+    if (c.id !== id) return c;
+    const newScore = toCol === 'client' ? 95 : toCol === 'hot' ? 80 : toCol === 'warm' ? 55 : 20;
+    return {
+      ...c,
+      score: newScore,
+      status: toCol === 'client' ? 'hot' : toCol
+    };
+  }));
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Lejek & Lead Scoring"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2"
+  }, ['kanban', 'rules'].map(t => /*#__PURE__*/React.createElement("button", {
+    key: t,
+    onClick: () => setActiveTab(t),
+    className: `px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === t ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:border-blue-300'}`
+  }, t === 'kanban' ? '📋 Kanban' : '⚙️ Reguły scoringu')))), activeTab === 'kanban' && /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-4 gap-4"
+  }, COLS.map(col => {
+    const cards = contacts.filter(c => getCol(c) === col.id);
+    return /*#__PURE__*/React.createElement("div", {
+      key: col.id,
+      className: `rounded-2xl p-4 border ${col.bg} ${col.border}`
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center justify-between mb-4"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: `font-semibold ${col.color}`
+    }, col.label), /*#__PURE__*/React.createElement("span", {
+      className: "px-2 py-0.5 bg-white rounded-lg text-xs font-bold text-gray-600 shadow-sm"
+    }, cards.length)), /*#__PURE__*/React.createElement("div", {
+      className: "space-y-3"
+    }, cards.map(c => /*#__PURE__*/React.createElement("div", {
+      key: c.id,
+      className: "kanban-card bg-white rounded-xl p-3 shadow-sm border border-white hover:shadow-md transition-shadow"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-2 mb-2"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-bold"
+    }, c.fn[0], c.ln[0]), /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 min-w-0"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "text-sm font-semibold text-gray-900 truncate"
+    }, c.fn, " ", c.ln), /*#__PURE__*/React.createElement("div", {
+      className: "text-xs text-gray-400 truncate"
+    }, c.email))), /*#__PURE__*/React.createElement("div", {
+      className: "flex items-center gap-2 mb-2"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden"
+    }, /*#__PURE__*/React.createElement("div", {
+      className: "h-full rounded-full",
+      style: {
+        width: `${c.score}%`,
+        background: c.score >= 70 ? '#16a34a' : c.score >= 40 ? '#f59e0b' : '#94a3b8'
+      }
+    })), /*#__PURE__*/React.createElement("span", {
+      className: `text-xs font-bold ${scoreColor(c.score)}`
+    }, c.score)), /*#__PURE__*/React.createElement("div", {
+      className: "text-xs text-gray-400 mb-2"
+    }, c.lastActivity), /*#__PURE__*/React.createElement("div", {
+      className: "flex gap-1 flex-wrap"
+    }, COLS.filter(cl => cl.id !== col.id).map(cl => /*#__PURE__*/React.createElement("button", {
+      key: cl.id,
+      onClick: e => {
+        e.stopPropagation();
+        moveContact(c.id, cl.id);
+      },
+      className: "text-xs px-1.5 py-0.5 bg-gray-100 hover:bg-blue-100 hover:text-blue-700 rounded transition-colors text-gray-600"
+    }, "\u2192", cl.label.split(' ')[0])))))));
+  })), activeTab === 'rules' && /*#__PURE__*/React.createElement("div", {
+    className: "bg-white rounded-2xl p-5 shadow-sm border border-gray-100"
+  }, /*#__PURE__*/React.createElement("h3", {
+    className: "font-semibold text-gray-900 mb-4"
+  }, "Regu\u0142y przyznawania punkt\xF3w"), /*#__PURE__*/React.createElement("div", {
+    className: "space-y-3"
+  }, rules.map(r => /*#__PURE__*/React.createElement("div", {
+    key: r.id,
+    className: "flex items-center gap-4 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors group"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: `w-9 h-9 rounded-lg flex items-center justify-center ${r.points > 0 ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-500'}`
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: r.points > 0 ? 'check' : 'trash',
+    size: 16
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 text-sm font-medium text-gray-800"
+  }, r.action), editRule === r.id ? /*#__PURE__*/React.createElement("input", {
+    type: "number",
+    defaultValue: r.points,
+    className: "w-20 border border-blue-400 rounded-lg px-2 py-1 text-sm text-center focus:outline-none",
+    onBlur: e => {
+      setRules(rs => rs.map(x => x.id === r.id ? {
+        ...x,
+        points: +e.target.value
+      } : x));
+      setEditRule(null);
+    }
+  }) : /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `text-sm font-bold ${r.points > 0 ? 'text-green-600' : 'text-red-500'}`
+  }, r.points > 0 ? '+' : '', r.points, " pkt"), /*#__PURE__*/React.createElement("button", {
+    onClick: () => setEditRule(r.id),
+    className: "opacity-0 group-hover:opacity-100 p-1 hover:bg-white rounded transition-all"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "edit",
+    size: 13,
+    cls: "text-gray-400"
+  }))))))));
+};
+
+// ============================================================
+// TEMPLATES VIEW
+// ============================================================
+const Templates = ({
+  onUse
+}) => {
+  const [filter, setFilter] = useState('');
+  const cats = [...new Set(TEMPLATES.map(t => t.cat))];
+  const filtered = filter ? TEMPLATES.filter(t => t.cat === filter) : TEMPLATES;
+  return /*#__PURE__*/React.createElement("div", {
+    className: "space-y-5 fade-in"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center justify-between"
+  }, /*#__PURE__*/React.createElement("h2", {
+    className: "text-xl font-bold text-gray-900"
+  }, "Szablony maili"), /*#__PURE__*/React.createElement("div", {
+    className: "flex gap-2"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => setFilter(''),
+    className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${!filter ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}`
+  }, "Wszystkie"), cats.map(c => /*#__PURE__*/React.createElement("button", {
+    key: c,
+    onClick: () => setFilter(c),
+    className: `px-3 py-1.5 rounded-lg text-sm font-medium transition-colors capitalize ${filter === c ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600 hover:border-blue-300'}`
+  }, c)))), /*#__PURE__*/React.createElement("div", {
+    className: "grid grid-cols-4 gap-4"
+  }, filtered.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    className: "bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-lg transition-shadow group"
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: `linear-gradient(135deg, ${t.color}, ${t.color}aa)`
+    },
+    className: "h-40 flex flex-col items-center justify-center relative p-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-12 h-12 bg-white bg-opacity-20 rounded-xl mb-2 flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "mail",
+    size: 24,
+    cls: "text-white"
+  })), /*#__PURE__*/React.createElement("div", {
+    className: "text-white text-center text-sm font-semibold"
+  }, t.name), /*#__PURE__*/React.createElement("div", {
+    className: "absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-20 transition-all flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement("button", {
+    onClick: () => onUse && onUse(t),
+    className: "opacity-0 group-hover:opacity-100 bg-white text-gray-800 text-sm font-semibold px-4 py-2 rounded-lg transition-all shadow-lg"
+  }, "U\u017Cyj szablonu"))), /*#__PURE__*/React.createElement("div", {
+    className: "p-4"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "font-semibold text-gray-900 text-sm"
+  }, t.name), /*#__PURE__*/React.createElement("div", {
+    className: "text-xs text-gray-500 mt-0.5"
+  }, t.desc), /*#__PURE__*/React.createElement("div", {
+    className: "mt-2"
+  }, /*#__PURE__*/React.createElement("span", {
+    className: `px-2 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600 capitalize`
+  }, t.cat)))))));
+};
+
+// ============================================================
+// SIDEBAR NAV
+// ============================================================
+const NAV = [{
+  id: 'dashboard',
+  label: 'Pulpit',
+  icon: 'dashboard'
+}, {
+  id: 'campaigns',
+  label: 'Kampanie',
+  icon: 'mail'
+}, {
+  id: 'automations',
+  label: 'Automatyzacje',
+  icon: 'zap'
+}, {
+  id: 'contacts',
+  label: 'Kontakty',
+  icon: 'users'
+}, {
+  id: 'opens',
+  label: 'Odczyty maili',
+  icon: 'eye'
+}, {
+  id: 'scoring',
+  label: 'Lejek & Scoring',
+  icon: 'trending'
+}, {
+  id: 'templates',
+  label: 'Szablony',
+  icon: 'file'
+}];
+
+// ============================================================
+// MAIN APP
+// ============================================================
+const App = () => {
+  const [section, setSection] = useState('dashboard');
+  const [campaigns, setCampaigns] = useState(CAMPAIGNS);
+  const nav = NAV.find(n => n.id === section) || NAV[0];
+  const renderSection = () => {
+    switch (section) {
+      case 'dashboard':
+        return /*#__PURE__*/React.createElement(Dashboard, {
+          campaigns: campaigns,
+          contacts: CONTACTS
+        });
+      case 'campaigns':
+        return /*#__PURE__*/React.createElement(Campaigns, {
+          campaigns: campaigns,
+          setCampaigns: setCampaigns
+        });
+      case 'automations':
+        return /*#__PURE__*/React.createElement(Automations, null);
+      case 'contacts':
+        return /*#__PURE__*/React.createElement(Contacts, null);
+      case 'opens':
+        return /*#__PURE__*/React.createElement(EmailOpens, null);
+      case 'scoring':
+        return /*#__PURE__*/React.createElement(Scoring, null);
+      case 'templates':
+        return /*#__PURE__*/React.createElement(Templates, {
+          onUse: () => setSection('campaigns')
+        });
+      default:
+        return /*#__PURE__*/React.createElement(Dashboard, {
+          campaigns: campaigns,
+          contacts: CONTACTS
+        });
+    }
+  };
+  return /*#__PURE__*/React.createElement("div", {
+    className: "flex h-screen overflow-hidden"
+  }, /*#__PURE__*/React.createElement("aside", {
+    className: "w-60 bg-slate-900 flex flex-col flex-shrink-0 h-full"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "p-5 border-b border-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "send",
+    size: 18,
+    cls: "text-white"
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-white font-bold text-lg leading-none"
+  }, "MAILER"), /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-400 text-xs mt-0.5"
+  }, "Email Automation")))), /*#__PURE__*/React.createElement("nav", {
+    className: "flex-1 p-3 space-y-1 overflow-y-auto"
+  }, NAV.map(n => /*#__PURE__*/React.createElement("button", {
+    key: n.id,
+    onClick: () => setSection(n.id),
+    className: `w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${section === n.id ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/30' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: n.icon,
+    size: 18
+  }), n.label, n.id === 'campaigns' && /*#__PURE__*/React.createElement("span", {
+    className: "ml-auto bg-slate-700 text-slate-300 text-xs px-1.5 py-0.5 rounded-full"
+  }, campaigns.length), n.id === 'contacts' && /*#__PURE__*/React.createElement("span", {
+    className: "ml-auto bg-slate-700 text-slate-300 text-xs px-1.5 py-0.5 rounded-full"
+  }, CONTACTS.length)))), /*#__PURE__*/React.createElement("div", {
+    className: "p-4 border-t border-slate-800"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold"
+  }, "JK"), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    className: "text-white text-sm font-medium"
+  }, "Jan Kowalski"), /*#__PURE__*/React.createElement("div", {
+    className: "text-slate-400 text-xs"
+  }, "Administrator"))))), /*#__PURE__*/React.createElement("div", {
+    className: "flex-1 flex flex-col min-w-0"
+  }, /*#__PURE__*/React.createElement("header", {
+    className: "bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between flex-shrink-0 shadow-sm"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("div", {
+    className: "w-8 h-8 bg-blue-50 text-blue-600 rounded-lg flex items-center justify-center"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: nav.icon,
+    size: 18
+  })), /*#__PURE__*/React.createElement("h1", {
+    className: "text-lg font-bold text-gray-900"
+  }, nav.label)), /*#__PURE__*/React.createElement("div", {
+    className: "flex items-center gap-3"
+  }, /*#__PURE__*/React.createElement("button", {
+    className: "p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "search",
+    size: 18
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "p-2 hover:bg-gray-100 rounded-lg text-gray-500 relative"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "alert",
+    size: 18
+  }), /*#__PURE__*/React.createElement("span", {
+    className: "absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"
+  })), /*#__PURE__*/React.createElement("button", {
+    className: "p-2 hover:bg-gray-100 rounded-lg text-gray-500"
+  }, /*#__PURE__*/React.createElement(Ic, {
+    name: "settings",
+    size: 18
+  })))), /*#__PURE__*/React.createElement("main", {
+    className: "flex-1 overflow-y-auto p-6"
+  }, renderSection())));
+};
+
+// ============================================================
+// GLOBAL STYLES (injected)
+// ============================================================
+const style = document.createElement('style');
+style.textContent = `
+  .label{display:block;font-size:.8rem;font-weight:600;color:#374151;margin-bottom:.35rem}
+  .input{display:block;width:100%;padding:.5rem .75rem;border:1px solid #e5e7eb;border-radius:.6rem;font-size:.875rem;outline:none;transition:border-color .15s;background:#fff}
+  .input:focus{border-color:#185FA5;box-shadow:0 0 0 3px rgba(24,95,165,.1)}
+  .btn-primary{background:#185FA5;color:#fff;font-weight:600;font-size:.875rem;padding:.55rem 1.25rem;border-radius:.7rem;border:none;cursor:pointer;transition:background .15s;white-space:nowrap}
+  .btn-primary:hover{background:#144e8a}
+  .btn-secondary{background:#fff;color:#374151;font-weight:600;font-size:.875rem;padding:.55rem 1.25rem;border-radius:.7rem;border:1px solid #e5e7eb;cursor:pointer;transition:all .15s}
+  .btn-secondary:hover{border-color:#185FA5;color:#185FA5}
+`;
+document.head.appendChild(style);
+ReactDOM.createRoot(document.getElementById('root')).render(/*#__PURE__*/React.createElement(App, null));
+</script>
+</body>
+</html>

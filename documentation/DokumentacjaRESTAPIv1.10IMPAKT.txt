@@ -1,0 +1,2294 @@
+Dokumentacja REST API v1.10
+etrade.pl
+Data aktualizacji: 01.04.2026
+
+Spis treści:
+
+1. Opis technologii​
+2. Autoryzacja​
+3. Metody​
+3.1. Pobieranie listy produktów​
+3.2. Pobieranie produktu​
+3.3. Pobieranie listy faktur​
+3.4. Pobieranie faktury​
+3.5. Pobieranie kategorii​
+3.6. Pobieranie listy zamówień​
+3.7. Pobieranie stanów magazynowych​
+3.9. Pobranie cen produktów​
+3.10. Pobieranie zamówienia​
+3.11. Pobieranie listy adresów​
+3.12. Zgłaszanie reklamacji - RMA​
+Przykład żądania:​
+3.13. Tworzenie nowego zamówienia​
+3.13.1. Zamówienie z dostawą na żądanie​
+3.13.2. Zamówienie z dostawą przez kuriera​
+3.13.3. Zamówienie z odbiorem osobistym​
+Changelog
+​
+Wersja 1.10 - data aktualizacji 01.04.2026
+●​ Zablokowanie możliwości pobrania faktur oraz korekt dla polskich firm w związku z
+uruchomieniem KSeF.
+​
+Wersja 1.9 - data aktualizacji 14.10.2024
+●​ Dodanie pola downloadLink w przypadku pobierania faktury.
+​
+Wersja 1.8 - data aktualizacji 07.06.2023
+●​ Dodanie pól ze szczegółami korekty corrDetails w przypadku pobierania faktury.
+​
+Wersja 1.7 - data aktualizacji 31.05.2023
+●​ Dodanie pól: sourceInvoiceNumber, correctionType, comment w odpowiedzi metody
+pobierania faktury.
+​
+Wersja 1.6 - data aktualizacji 20.02.2023
+●​ Dodanie nowej metody do zgłaszania RMA.
+​
+
+Wersja 1.5 - data aktualizacji 06.04.2022
+●​ Dodanie nowego pola manufacturerAdditionalWarranty.
+Wersja 1.4 - data aktualizacji 15.10.2020
+●​ Dodanie niezobowiązującej ceny detalicznej dla produktów.
+●​ Dodanie metody służącej do aktualizacji stanów magazynowych (pkt. 3.7).
+●​ Dodanie metody służącej do aktualizacji cen produktów (pkt. 3.8).
+
+Strona 2 z 36
+
+3
+3
+3
+3
+8
+11
+13
+16
+18
+20
+22
+24
+27
+28
+28
+29
+29
+31
+33
+
+1.​ Opis technologii
+API systemu etrade.pl zostało zrealizowane według wzorca REST.
+Komunikacja polega na wysyłaniu żądania HTTP pod adres: https://api.etrade.pl/.
+Odpowiedź zwracana jest w formacie JSON.
+
+2.​ Autoryzacja
+Każde żądanie w API wymaga uwierzytelnienia. Uwierzytelnienie następuje poprzez wysłanie nagłówka
+Authorization: Basic.
+Sugestia: Dzięki nowemu systemowi zarządzania uprawnieniami powinieneś utworzyć użytkownika API
+któremu przydzielisz uprawnienia tylko do części systemu z których będziesz korzystać.
+Dzięki bezpiecznemu połączeniu (https) logowanie przy pomocy Http Basic-Auth jest bezpieczne i proste
+w użyciu.
+Przykład implementacji:
+​
+Linux:
+curl -u ADMIN:admin1 "https://api.etrade.pl/v1/products"
+PHP:
+<?php
+$username='ADMIN';
+$password='admin1';
+$url ='https://api.etrade.pl/v1/products'
+$ch = curl_init();
+curl_setopt($ch, CURLOPT_URL, $url);
+curl_setopt($ch, CURLOPT_RETURNTRANSFER,1);
+curl_setopt($ch, CURLOPT_HTTPAUTH, CURLAUTH_ANY);
+curl_setopt($ch, CURLOPT_USERPWD, "$username:$password");
+$result = curl_exec($ch);
+curl_close ($ch);
+
+3.​ Metody
+3.1.​ Pobieranie listy produktów
+Metoda służy do pobierania listy produktów.
+
+Strona 3 z 36
+
+Wywołanie: GET /v1/products
+Parametry wywołania:
+
+inStock
+
+Opcjonalnie
+
+Dostępność produktów.
+Wartości:
+1 - tylko produkty dostępne na stanie
+0 - wszystkie produkty
+
+category
+
+Opcjonalnie
+
+Id kategorii
+
+subCategory
+
+Opcjonalnie
+
+Id podkategorii
+
+manufacturers
+
+Opcjonalnie
+
+Tablica z id producentów
+
+query
+
+Opcjonalnie
+
+Szukana fraza w nazwie produktu lub w id produktu
+
+page
+
+Opcjonalnie
+
+Numer strony
+
+perPage
+
+Opcjonalnie
+
+Liczba produktów na stronę
+
+sortBy
+
+Opcjonalnie
+
+Sortowanie po polach. Wartości:
+name - sortowanie po nazwie produktu
+price - sortowanie po cenie produktu
+
+sortDirection
+
+Opcjonalnie
+
+Kierunek sortowania. Wartości:
+ASC - rosnąco
+DESC - malejąco
+
+locale
+
+Opcjonalnie
+
+Język: pl lub en. Domyślnie pl.
+
+Przykład odpowiedzi:
+{
+"pages": 10,
+"results": [
+{
+"id": "Z15147",
+"name": "BRELOK DO KLUCZY GAYA ASSASSINS CREED - ANIMUS LOGO",
+"ean": "4260241123166",
+"manufacturerCode": "GE2014",
+"price": 16.09,
+"grossPrice": 19.79,
+"nrpPrice": 26.99,
+"vat": 23,
+"warranty": 0,
+“manufacturerAdditionalWarranty”: 0,
+"outdoorWarranty": false,
+
+Strona 4 z 36
+
+"inStock": ">10",
+"isBeingOrdered": true,
+"deliveryDate": "2015-10-15",
+"packageSize": 20,
+"manufacturer": {
+"id": "GEMBIRD",
+"name": "Gembird"
+},
+"unitMeasure": "szt.",
+“categories”: [
+{
+“id”: “KOM”,
+“subcategories”: [
+{
+“id”: “ADAPAS”
+}
+]
+},
+{
+“id”: “AVI”,
+“subcategories”: [
+{
+“id”: “ADAPAS”
+},
+{
+“id”: “KABTV”
+}
+]
+}
+],
+“description”: “Opis produktu….”,
+"photos": [
+"http://web.imapkt.com.pl/Z15147_1.jpg",
+"http://web.imapkt.com.pl/Z15147_2.jpg"
+],
+"downloads": [
+{
+"name": "Sterowniki Win 10",
+"url": "http://web.imapkt.com.pl/orion_win_10.zip"
+}
+],
+"hiRes": [
+{
+"name": "Widok z góry",
+"url": "http://web.imapkt.com.pl/Z15147_1.jpg"
+}
+],
+"attributes": [
+{
+"name": "Długość kabla",
+
+Strona 5 z 36
+
+"value": "250",
+"unitMeasure": "cm",
+}
+]
+}
+]
+}
+
+Zwracane dane:
+pages
+
+Liczba dostępnych stron z produktami
+
+id
+
+Id produktu
+
+name
+
+Nazwa produktu
+
+ean
+
+Numer EAN
+
+manufacturerCode
+
+Kod producenta
+
+price
+
+Cena netto
+
+grossPrice
+
+Cena brutto
+
+nrpPrice
+
+Niezobowiązująca cena detaliczna
+
+vat
+
+Wysokość podatku VAT
+
+warranty
+
+Liczba miesięcy na gwarancji
+
+manufacturerAdditionalWarra
+nty
+
+Liczba miesięcy gwarancji producenta. Wraz z polem “warranty”
+określa sumaryczną gwarancję dla produktu, gdzie przez okres
+“warranty” odpowiada Impakt, natomiast przez następny
+“manufacturerAdditionalWarranty” miesięcy odpowiada
+producent.
+
+outdoorWarranty
+
+Gwarancja producenta
+
+inStock
+
+Dostępność produktu
+
+isBeingOrdered
+
+Produkt jest zamówiony
+
+deliveryDate
+
+Data dostawy produktu do magazynu
+
+packageSize
+
+Liczba sztuk w paczce
+
+manufacturer
+
+Dane producenta
+
+unitMeasure
+
+Jednostka miary
+
+Strona 6 z 36
+
+categories
+
+Lista kategorii do jakich przypisany jest produkt
+
+categories.subcategories
+
+Lista podkategorii do jakich przypisany jest produkt
+
+description
+
+Opis produktu
+
+photos
+
+Lista zdjęć produktu
+
+downloads
+
+Lista plików do pobrania
+
+hiRes
+
+Lista zdjęć wysokiej rozdzielczości
+
+attributes
+
+Lista cech produktu
+
+Strona 7 z 36
+
+3.2.​ Pobieranie produktu
+Metoda służy do pobrania produktu.
+Wywołanie: GET /v1/products/{id}
+Parametry wywołania:
+id
+
+Wymagane
+
+Id produktu dostępnego w systemie np. Z15147
+
+locale
+
+Opcjonalnie
+
+Język: pl lub en. Domyślnie pl.
+
+Przykład odpowiedzi:
+{
+"id": "Z15147",
+"name": "SŁUCHAWKI ASUS ORION",
+"description": "Magnesy neodymowe o średnicy...",
+"attributes": [
+{
+"name": "Długość kabla",
+"value": "250",
+"unitMeasure": "cm",
+}
+],
+"photos": [
+"http://web.imapkt.com.pl/Z15147_1.jpg",
+"http://web.imapkt.com.pl/Z15147_2.jpg"
+],
+"downloads": [
+{
+"name": "Sterowniki Win 10",
+"url": "http://web.imapkt.com.pl/orion_win_10.zip"
+}
+],
+"hiRes": [
+{
+"name": "Widok z góry",
+"url": "http://web.imapkt.com.pl/Z15147_1.jpg"
+}
+],
+"ean": "4260241123166",
+"manufacturerCode": "GE2014",
+"price": 16.09,
+"grossPrice": 19.79,
+"nrpPrice": 26.99,
+"vat": 23,
+"warranty": 0,
+
+Strona 8 z 36
+
+“manufacturerAdditionalWarranty”: 0,
+"outdoorWarranty": false,
+"inStock": ">10",
+"isBeingOrdered": true,
+"deliveryDate": "2015-10-15",
+"packageSize": 20,
+"manufacturer": {
+"id": "GEMBIRD",
+"name": "Gembird"
+},
+"unitMeasure": "szt.",
+“categories”: [
+{
+“id”: “KOM”,
+“subcategories”: [
+{
+“id”: “ADAPAS”
+}
+]
+},
+{
+“id”: “AVI”,
+“subcategories”: [
+{
+“id”: “ADAPAS”
+},
+{
+“id”: “KABTV”
+}
+]
+}
+]
+}
+Zwracane dane:
+id
+
+Id produktu
+
+name
+
+Nazwa produktu
+
+description
+
+Opis produktu
+
+attributes
+
+Lista cech produktu
+
+photos
+
+Lista zdjęć produktu
+
+downloads
+
+Lista plików do pobrania
+
+hiRes
+
+Lista zdjęć wysokiej rozdzielczości
+
+Strona 9 z 36
+
+ean
+
+Numer EAN
+
+manufacturerCode
+
+Kod producenta
+
+price
+
+Cena netto
+
+grossPrice
+
+Cena brutto
+
+nrpPrice
+
+Niezobowiązująca cena detaliczna
+
+vat
+
+Wysokość podatku VAT
+
+warranty
+
+Liczba miesięcy na gwarancji
+
+manufacturerAdditionalWarra
+nty
+
+Liczba miesięcy gwarancji producenta. Wraz z polem “warranty”
+określa sumaryczną gwarancję dla produktu, gdzie przez okres
+“warranty” odpowiada Impakt, natomiast przez następny
+“manufacturerAdditionalWarranty” miesięcy odpowiada
+producent.
+
+outdoorWarranty
+
+Gwarancja producenta
+
+inStock
+
+Dostępność produktu
+
+isBeingOrdered
+
+Produkt jest zamówiony
+
+deliveryDate
+
+Data dostawy produktu do magazynu
+
+packageSize
+
+Liczba sztuk w paczce
+
+manufacturer
+
+Dane producenta
+
+unitMeasure
+
+Jednostka miary
+
+categories
+
+Lista kategorii do jakich przypisany jest produkt
+
+categories.subcategories
+
+Lista podkategorii do jakich przypisany jest produkt
+
+Strona 10 z 36
+
+3.3.​ Pobieranie listy faktur
+Metoda służy do pobierania listy faktur.
+Wywołanie: GET /v1/invoices
+Parametry wywołania:
+
+type
+
+Opcjonalnie
+
+Rodzaj faktury. Wartości:
+FS - faktura VAT
+KS - korekta faktury VAT
+dowolna inna (domyślna) - wszystkie
+
+from
+
+Opcjonalnie
+
+Data od której pobrane mają zostać faktury. Format
+daty: RRRR-MM-DD
+
+to
+
+Opcjonalnie
+
+Data do której pobrane mają zostać faktury. Format
+daty: RRRR-MM-DD
+
+page
+
+Opcjonalnie
+
+Numer strony
+
+perPage
+
+Opcjonalnie
+
+Liczba faktur na stronę
+
+unpaid
+
+Opcjonalne
+
+0 - wszystkie faktury
+1 - faktury niezapłacone
+
+UWAGA
+Od 1 kwietnia 2026 roku w związku z uruchomieniem KSeF pole downloadLink będzie puste
+dla firm zarejestrowanych w Polsce.
+Przykład odpowiedzi:
+{
+"pages": 10,
+"results": [
+{
+"id": "FS-2015-13312",
+"invoiceNumber": "FS/2015/13312",
+"currency": "pln",
+"totalAmount": 239.90,
+"totalGrossAmount": 260.09,
+"codAmount": 0,
+"date": "2015-10-17",
+"dueDate": "2015-10-17",
+"paymentMethod": "przelew 45 dni",
+"remaingAmount": 0,
+"paidDate": "2015-10-25",
+
+Strona 11 z 36
+
+"type": "FS",
+“downloadLink”: ‘’,
+"delivery": {
+"method": "DPD",
+"number": "W789456"
+}
+}
+]
+}
+
+Zwracane dane:
+pages
+
+Liczba dostępnych stron z fakturami
+
+id
+
+Id produktu
+
+invoiceNumber
+
+Numer faktury
+
+currency
+
+Waluta
+
+totalAmount
+
+Wartość faktury netto
+
+totalGrossAmount
+
+Wartość faktury brutto
+
+codAmount
+
+Wartość pobrania
+
+date
+
+Data wystawienia faktury
+
+dueDate
+
+Oczekiwana data płatności
+
+paymentMethod
+
+Metoda płatności
+
+remaingAmount
+
+Kwota pozostała do zapłaty
+
+paidDate
+
+Data zaksięgowania płatności
+
+downloadLink
+
+W przypadku e-faktur w tym polu będzie się znajdował link do
+pobrania faktury w formacie PDF
+
+type
+
+Typ faktury. Wartości:
+FS - faktura VAT
+KS - Korekta faktury
+
+delivery
+
+Dane dotyczące wysyłki towaru
+
+delivery.method
+
+Metoda wysyłki towaru
+
+delivery.number
+
+Numer przesyłki
+
+Strona 12 z 36
+
+3.4.​ Pobieranie faktury
+Metoda służy do pobrania faktury.
+Wywołanie: GET /v1/invoices/{id}
+Parametry wywołania:
+id
+
+Wymagane
+
+Id faktury np. FS-2015-13312
+
+UWAGA
+Od 1 kwietnia 2026 roku w związku z uruchomieniem KSeF pole downloadLink będzie puste
+dla firm zarejestrowanych w Polsce.
+Przykład odpowiedzi:
+{
+"id": "FS-2015-13312",
+"invoiceNumber": "FS/2015/13312",
+“sourceInvoiceNumber”: ‘FS/2011/12345”,
+"currency": "pln",
+"totalAmount": 239.90,
+"totalGrossAmount": 260.09,
+"externalNumber": "",
+"deliveryAddress": "Lema 16, 62-050 Mosina",
+"codAmount": 0,
+"date": "2015-10-17",
+"dueDate": "2015-10-17",
+"paymentMethod": "przelew 45 dni",
+"remaingAmount": 0,
+"paidDate": "2015-10-25",
+"type": "FS",
+“correctionType”: “quantity”,
+“comment”: “”
+“downloadLink”: ‘’,
+"delivery": {
+"method": "DPD",
+"number": "W789456
+},
+"payer": {
+"id": "N0000",
+"address": "Lema 16, 62-050 Mosina"
+},
+"buyer": {
+"id": "N0000",
+"address": "Lema 16, 62-050 Mosina"
+},
+"relatedDocuments": [
+
+Strona 13 z 36
+
+{
+"date": "2015-10-17"
+"number": "FS/2015/13315",
+"type": "ORDER"
+}
+],
+"items": [
+{
+"id": "Z15147",
+"manufacturerCode": "GEMBIRD",
+"name": "SŁUCHAWKI ASUS ORION",
+"unitMeasure": "szt.",
+"vat": 23,
+"quantity": 2,
+"totalAmount": 521.8,
+"totalGrossAmount": 641.8,
+"unitAmount": 260.90,
+"unitGrossAmount": 320.90
+}
+]
+}
+
+Zwracane dane:
+id
+
+Id produktu
+
+invoiceNumber
+
+Numer faktury
+
+sourceInvoiceNumber
+
+Numer faktury źródłowej uzupełniony w przypadku korekty
+
+currency
+
+Waluta
+
+totalAmount
+
+Wartość faktury netto
+
+totalGrossAmount
+
+Wartość faktury brutto
+
+externalNumber
+
+Zewnętrzny numer faktury
+
+deliveryAddress
+
+Adres dostawy towaru
+
+codAmount
+
+Wartość pobrania
+
+date
+
+Data wystawienia faktury
+
+dueDate
+
+Oczekiwana data płatności
+
+paymentMethod
+
+Metoda płatności
+
+remaingAmount
+
+Kwota pozostała do zapłaty
+
+Strona 14 z 36
+
+paidDate
+
+Data zaksięgowania płatności
+
+type
+
+Typ faktury. Wartości:
+FS - faktura VAT
+KS - Korekta faktury
+
+correctionType
+
+Rodzaj korekty: ilościowa (quantity), cenowa (price)
+
+comment
+
+Komentarz do faktury
+
+downloadLink
+
+W przypadku e-faktur w tym polu będzie się znajdował link do
+pobrania faktury w formacie PDF
+
+delivery
+
+Dane dotyczące wysyłki towaru
+
+delivery.method
+
+Metoda wysyłki towaru
+
+delivery.number
+
+Numer przesyłki
+
+payer
+
+Dane płatnika
+
+payer.id
+
+Id płatnika
+
+payer.data
+
+Adres płatnika
+
+buyer
+
+Dane nabywcy
+
+buyer.data
+
+Id nabywcy
+
+buyer.address
+
+Adres nabywcy
+
+relatedDocuments
+
+Lista powiązanych dokumentów
+
+relatedDocuments.date
+
+Data powiązanego dokumentu
+
+relatedDocuments.number
+
+Number powiązanego dokumentu
+
+relatedDocuments.type
+
+Typ dokumentu: Wartości:
+SHIPPING_NOTE - dokument WZ
+ORDER - zamówienie
+
+items
+
+Lista zamówionych produktów
+
+items.id
+
+Id produktu
+
+items.manufacturerCode
+
+Kod producenta produktu
+
+items.name
+
+Nazwa produktu
+
+items.unitMeasure
+
+Jednostka miary
+
+items.vat
+
+Wysokość podatku VAT
+
+items.quantity
+
+Liczba sztuk
+
+Strona 15 z 36
+
+items.totalAmount
+
+Wartość pozycji netto
+
+items.totalGrossAmount
+
+Wartość pozycji brutto
+
+items.unitAmount
+
+Cena jednostkowa netto
+
+items.unitGrossAmount
+
+Cena jednostkowa brutto
+
+items.corrDetails
+
+Dane z faktury powiązanej do korekty (tylko dla typu KS)
+
+items.corrDetails.totalAmount
+
+Wartość pozycji netto przed korektą
+
+items.corrDetails.totalGrossAm
+ount
+
+Wartość pozycji brutto przed korektą
+
+items.corrDetails.unitAmount
+
+Cena jednostkowa netto przed korektą
+
+items.corrDetails.unitGrossAm
+ount
+
+Cena jednostkowa brutto przed korektą
+
+items.corrDetails.quantity
+
+Liczba sztuk przed korektą
+
+items.corrDetails.relatedInvoice
+
+Numer dokumentu, do którego wystawiona została korekta
+
+Strona 16 z 36
+
+3.5.​ Pobieranie kategorii
+Metoda służy do pobrania kategorii.
+Wywołanie: GET /v1/categories
+Parametry wywołania:
+locale
+
+Opcjonalnie
+
+Język: pl lub en. Domyślnie pl.
+
+Przykład odpowiedzi:
+{
+"categoryTree": [
+{
+"id": "AVI"
+"name": "Audio Video",
+"subCategories": [
+{
+"id": "AVI.DYKTAF",
+"name": "Dyktafony"
+}
+]
+}
+],
+"manufacturerTree": [
+{
+"id": "GEMBIRD"
+"name": "Gembird"
+"categories": [
+{
+"id": "AVI"
+"name": "Audio Video",
+"subCategories": [
+{
+"id": "AVI.DYKTAF",
+"name": "Dyktafony"
+}
+]
+}
+]
+}
+]
+}
+
+Strona 17 z 36
+
+Zwracane dane:
+categoryTree
+
+Drzewko kategorii
+
+categoryTree.id
+
+Id kategorii
+
+categoryTree.name
+
+Nazwa kategorii
+
+categoryTree.subCategories
+
+Drzewko podkategorii
+
+categoryTree.subCategories.id
+
+Id podkategorii
+
+categoryTree.subCategories.name
+
+Nazwa podkategorii
+
+manufacturerTree
+
+Drzewko producentów
+
+manufacturerTree.id
+
+Id producenta
+
+manufacturerTree.name
+
+Nazwa producenta
+
+manufacturerTree.categories
+
+Drzewko kategorii
+
+manufacturerTree.categories.id
+
+Id kategorii
+
+manufacturerTree.categories.name
+
+Nazwa kategorii
+
+manufacturerTree.categories.subCategories
+
+Drzewko podkategorii
+
+manufacturerTree.categories.subCategories.id
+
+Id podkategorii
+
+manufacturerTree.categories.subCategories.name
+
+Nazwa podkategorii
+
+​
+
+Strona 18 z 36
+
+3.6.​ Pobieranie listy zamówień
+Metoda służy do pobrania listy zamówień.
+Wywołanie: GET /v1/orders
+Parametry wywołania:
+
+from
+
+Opcjonalnie
+
+Data, od której pobrane mają zostać zamówienia.
+Format daty: RRRR-MM-DD
+
+to
+
+Opcjonalnie
+
+Data, do której pobrane mają zostać zamówienia.
+Format daty: RRRR-MM-DD
+
+page
+
+Opcjonalnie
+
+Numer strony
+
+perPage
+
+Opcjonalnie
+
+Liczba zamówień na stronę
+
+Przykład odpowiedzi:
+{
+"results": [
+{
+"id": "ZM-2017-1111"
+"orderNumber": "ZM/2017/03784",
+"currency": "PLN",
+"totalAmount": "161.75000000",
+"totalGrossAmount": "198.95000000",
+"date": "2016-02-01",
+"delivery": {
+“method”: “DPD”
+},
+"paymentMethod": "przelew 35 dni",
+"status": "Do roztrzygnięcia",
+"statusId": 0,
+"alertMessage": "Przekroczony limit kredytu",
+"createdOnEtrade": false
+}
+]
+}
+
+Strona 19 z 36
+
+Zwracane dane:
+id
+
+Id zamówienia
+
+orderNumber
+
+Numer zamówienia
+
+currency
+
+Waluta
+
+totalAmount
+
+Wartość zamówienia netto
+
+totalGrossAmount
+
+Wartość zamówienia brutto
+
+date
+
+Data złożenia zamówienia
+
+delivery
+
+Dane dotyczące wysyłki
+
+delivery.method
+
+Metoda wysyłki
+
+paymentMethod
+
+Metoda płatności
+
+status
+
+Status zamówienia
+
+statusId
+
+Id statusu zamówienia
+
+alertMessage
+
+Dodatkowa informacja
+
+createdOnEtrade
+
+Zamówienie dodane w systemie etrade.pl
+
+Lista dostępnych statusów
+0
+
+U handlowca
+
+1
+
+Do rozstrzygnięcia
+
+2
+
+W trakcie pakowania
+
+3
+
+W magazynie: Oczekuje na spakowanie
+
+4
+
+W magazynie: W trakcie załadunku
+
+5
+
+Zrealizowane
+
+6
+
+Anulowane
+
+7
+
+W magazynie: Oczekuje na towar
+
+8
+
+W trakcie rozstrzygania
+
+Strona 20 z 36
+
+3.7.​ Pobieranie stanów magazynowych
+Metoda służy do pobierania listy stanów magazynowych bez pozostałych danych.
+Wywołanie: GET /v1/stocks
+Parametry wywołania:
+
+inStock
+
+Opcjonalnie
+
+Dostępność produktów.
+Wartości:
+1 - tylko produkty dostępne na stanie
+0 - wszystkie produkty
+
+category
+
+Opcjonalnie
+
+Id kategorii
+
+subCategory
+
+Opcjonalnie
+
+Id podkategorii
+
+manufacturers
+
+Opcjonalnie
+
+Tablica z id producentów
+
+query
+
+Opcjonalnie
+
+Szukana fraza w nazwie produktu lub w id produktu
+
+page
+
+Opcjonalnie
+
+Numer strony
+
+perPage
+
+Opcjonalnie
+
+Liczba produktów na stronę
+
+sortBy
+
+Opcjonalnie
+
+Sortowanie po polach. Wartości:
+name - sortowanie po nazwie produktu
+price - sortowanie po cenie produktu
+
+sortDirection
+
+Opcjonalnie
+
+Kierunek sortowania. Wartości:
+ASC - rosnąco
+DESC - malejąco
+
+locale
+
+Opcjonalnie
+
+Język: pl lub en. Domyślnie pl.
+
+Przykład odpowiedzi:
+{
+"results": [
+{
+"id": "Z30160",
+"ean": "4043619652655",
+"manufacturerCode": "65265",
+"inStock": 429
+},
+{
+"id": "Z30689",
+"ean": "5060301693559",
+"manufacturerCode": "RF-AF140-D1",
+
+Strona 21 z 36
+
+"inStock": 40
+}
+],
+"pages": 90
+}
+
+Zwracane dane:
+
+id
+
+Id produktu
+
+ean
+
+Numer EAN
+
+manufacturerCode
+
+Kod producenta
+
+inStock
+
+Dostępność produktu
+
+pages
+
+Liczba dostępnych stron z produktami
+
+Strona 22 z 36
+
+3.8.​ Pobranie cen produktów
+Metoda służy do pobierania listy cen produktów bez pozostałych danych.
+Wywołanie: GET /v1/prices
+Parametry wywołania:
+
+inStock
+
+Opcjonalnie
+
+Dostępność produktów.
+Wartości:
+1 - tylko produkty dostępne na stanie
+0 - wszystkie produkty
+
+category
+
+Opcjonalnie
+
+Id kategorii
+
+subCategory
+
+Opcjonalnie
+
+Id podkategorii
+
+manufacturers
+
+Opcjonalnie
+
+Tablica z id producentów
+
+query
+
+Opcjonalnie
+
+Szukana fraza w nazwie produktu lub w id produktu
+
+page
+
+Opcjonalnie
+
+Numer strony
+
+perPage
+
+Opcjonalnie
+
+Liczba produktów na stronę
+
+sortBy
+
+Opcjonalnie
+
+Sortowanie po polach. Wartości:
+name - sortowanie po nazwie produktu
+price - sortowanie po cenie produktu
+
+sortDirection
+
+Opcjonalnie
+
+Kierunek sortowania. Wartości:
+ASC - rosnąco
+DESC - malejąco
+
+locale
+
+Opcjonalnie
+
+Język: pl lub en. Domyślnie pl.
+
+Przykład odpowiedzi:
+{
+"results": [
+{
+"id": "Z30687",
+"ean": "5060301693542",
+"manufacturerCode": "RF-AF120-D1",
+"price": 250.5,
+"grossPrice": 307.5,
+"oldPrice": null,
+"nrpPrice": 400.5
+},
+{
+
+Strona 23 z 36
+
+"id": "Z30689",
+"ean": "5060301693559",
+"manufacturerCode": "RF-AF140-D1",
+"price": 228.45,
+"grossPrice": 228,99,
+"oldPrice": null,
+"nrpPrice": 300
+}
+],
+"pages": 90
+}
+
+Zwracane dane:
+id
+
+Id produktu
+
+ean
+
+Numer EAN
+
+manufacturerCode
+
+Kod producenta
+
+price
+
+Cena netto
+
+grossPrice
+
+Cena brutto
+
+nrpPrice
+
+Niezobowiązująca cena detaliczna
+
+pages
+
+Liczba dostępnych stron z produktami
+
+Strona 24 z 36
+
+3.9.​ Pobieranie zamówienia
+Metoda służy do pobrania zamówienia.
+Wywołanie: GET /v1/orders/{id}
+Parametry wywołania:
+id
+
+Wymagane
+
+Id zamówienia np. ZM-2015-13312
+
+Przykład odpowiedzi:
+{
+"id": "ZM-2017-1111"
+"orderNumber": "ZM/2017/03784",
+"currency": "PLN",
+"totalAmount": "161.75000000",
+"totalGrossAmount": "198.95000000",
+"date": "2016-02-01",
+"paymentMethod": "przelew 35 dni",
+"status": "Do roztrzygnięcia",
+"statusId": 0,
+"alertMessage": "Przekroczony limit kredytu",
+"comment": "",
+"externalNumber": "NATEC",
+"isInBundledInvoice": false,
+"createdOnEtrade": false,
+"delivery": {
+“method”: “DPD”
+“forwardingNumber”: “”
+“address”: “KOWAL Jan Kowalski, Piłsudskiego 88, 48-521 Poznań”
+“codAmount”: “0.00000000”
+},
+“payer”: {
+“id”: “N00000”,
+“data”: “KOWAL Jan Kowalski, Piłsudskiego 88, 48-521 Poznań”
+},
+“buyer”: {
+“id”: “N00000”,
+“data”: “KOWAL Jan Kowalski, Piłsudskiego 88, 48-521 Poznań”
+},
+“items”: [
+{
+“id”: “Z19700”,
+“manufacturerCode”: “WF2520P”,
+“name”: “ACCESS POINT SUFITOWY WIFI N300”,
+“unitMeasure”: “SZT”,
+
+Strona 25 z 36
+
+“quantity”: “1”,
+“quantityReserved”: “1”,
+“totalAmount”: “148.78000000”,
+“totalGrossAmount”: “182.95000000”,
+“unitAmount”: “148.78000000”,
+“unavailable”: false
+}
+]
+}
+
+Zwracane dane:
+id
+
+Id zamówienia
+
+orderNumber
+
+Numer zamówienia
+
+currency
+
+Waluta
+
+totalAmount
+
+Wartość zamówienia netto
+
+totalGrossAmount
+
+Wartość zamówienia brutto
+
+date
+
+Data złożenia zamówienia
+
+paymentMethod
+
+Metoda płatności
+
+status
+
+Status zamówienia
+
+statusId
+
+Id statusu zamówienia
+
+alertMessage
+
+Dodatkowa informacja
+
+comment
+
+Komentarz
+
+externalNumber
+
+Numer dokumentu zewnętrznego
+
+isBundledInvoice
+
+Faktura zbiorcza
+
+createdOnEtrade
+
+Zamówienie dodane w systemie etrade.pl
+
+delivery
+
+Informacje o przesyłce
+
+delivery.method
+
+Metoda przesyłki
+
+delivery.forwardingNumber
+
+Numer listu przewozowego
+
+delivery.address
+
+Adres dostawy
+
+delivery.codAmount
+
+Wartość płatności przy odbiorze
+
+Strona 26 z 36
+
+payer
+
+Informacje o płatniku
+
+payer.id
+
+Id płatnika
+
+payer.data
+
+Nazwa płatnika
+
+buyer
+
+Informacje o nabywcy
+
+buyer.id
+
+Id nabywcy
+
+buyer.data
+
+Nazwa nabywcy
+
+items
+
+Produkty
+
+items.id
+
+Id produktu
+
+items.manufacturerCode
+
+Kod producenta
+
+items.name
+
+Nazwa produktu
+
+items.unitMeasure
+
+Jednostka miary
+
+items.quantity
+
+Ilość
+
+items.quantityReserved
+
+Zarezerwowana ilość
+
+items.totalAmount
+
+Wartość pozycji w zamówieniu netto
+
+items.totalGrossAmount
+
+Wartość pozycji w zamówieniu brutto
+
+items.unitAmount
+
+Cena jednostkowa netto
+
+items.unavailable
+
+Produkt wycofany z oferty
+
+Strona 27 z 36
+
+3.10.​ Pobieranie listy adresów
+Metoda służy do pobierania listy adresów.
+Wywołanie: GET /v1/addresses
+Przykład odpowiedzi:
+{
+"results": [
+{
+"id": "179",
+"name": "Siedziba firmy (Lema 16, 62-050 Mosina)"
+}
+]
+}
+
+Strona 28 z 36
+
+3.11.​ Zgłaszanie reklamacji - RMA
+Metoda służy do tworzenia nowego zgłoszenia reklamacyjnego - RMA.
+Wywołanie: POST /v1/rma
+Parametry wywołania:
+rma.phone
+
+Wymagane
+
+Numer telefonu
+
+rma.shippingAddress
+
+Wymagane
+
+Identyfikator adresu dostawy
+
+rma.documents
+
+Lista załączników
+
+rma.documents.filename
+
+Wymagane
+
+Nazwa pliku
+
+rma.documents.content
+
+Wymagane
+
+Plik w formacie Base64
+
+rma.items.description
+
+Wymagane
+
+Opis usterki
+
+rma.items.externalRmaNo
+
+Opcjonalne
+
+Własny numer reklamacji
+
+rma.items.bundledItems
+
+Opcjonalne
+
+Komplet np. pudełko, kabel, płyta
+DVD
+
+rma.items.operatingSystem
+
+Opcjonalne
+
+System operacyjny
+
+rma.items.serialNo
+
+Wymagane
+warunkowo
+
+Numer seryjny
+
+rma.items.product
+
+Wymagane
+
+Kod produktu Impakt
+
+rma.items
+
+Przykład żądania:
+
+{
+"rma": {
+"phone": "111222333",
+"shippingAddress": 2,
+"documents": [{
+"filename": "rma-potwierdzenie.pdf",
+"content": "iVBORw0KGgoAAAANSU..."
+}],
+"items": [
+{
+"product": "Z29905",
+"description": "Ke",
+"externalRmaNo": "RMA/129475",
+"serialNo": "LZKS56987",
+
+Strona 29 z 36
+
+"operatingSystem": "Windows 10"
+},
+{
+"product": "Z25371",
+"description": "Single left button click makes double clicks",
+"externalRmaNo": "RMA/129475",
+"serialNo": "KAIX1230123"
+}
+]
+}
+}
+Przykład odpowiedzi:
+W przypadku poprawnie złożonej reklamacji w odpowiedzi zwracany jest id reklamacji
+{
+"id": "S-XX-XXXXX"
+}
+W przypadku wystąpienia błędów zwracany jest kod 400 wraz z komunikatem błędu:
+{
+"error": "<ERROR_DESCRIPTION>"
+}
+3.12.​ Tworzenie nowego zamówienia
+Metoda służy do tworzenia nowego zamówienia.
+Wywołanie: POST /v1/orders
+3.12.1.​ Zamówienie z dostawą na żądanie
+Dane żądania DOD:
+
+order.details.deliveryMethodId
+
+Wymagane
+
+DOD
+Metoda wysyłki zamówienia
+Informacje dotyczące dostawy na
+żądanie
+
+order.details.dodData
+order.details.dodData.city
+
+Wymagane
+
+Miasto
+
+order.details.dodData.postalCode
+
+Wymagane
+
+Kod pocztowy
+
+Strona 30 z 36
+
+order.details.dodData.street
+
+Wymagane
+
+Ulica
+
+order.details.dodData.streetNumber
+
+Wymagane
+
+Numer ulicy
+
+order.details.dodData.phone
+
+Wymagane
+
+Telefon
+
+order.details.dodData.email
+
+Wymagane
+
+E-mail
+
+order.details.dodData.deliverToPerson
+
+order.details.dodData.firstName
+
+order.details.dodData.lastName
+
+Opcjonalne
+Deprecated
+
+Wymagane*
+Deprecated
+
+Wymagane*
+Deprecated
+
+Dostawa do osoby
+Imię
+*Wymagane - w przypadku gdy pole
+deliverToPerson ma ustawioną
+wartość na true
+
+Nazwisko
+*Wymagane - w przypadku gdy pole
+deliverToPerson ma ustawioną
+wartość na true
+
+Nazwa odbiorcy
+Wymagane w przypadku, gdy pole
+deliverToPerson ma ustawioną
+wartość na false
+
+order.details.dodData.name
+
+Wymagane*
+
+order.details.dodData.addCod
+
+Wymagane
+
+Przesyłka pobraniowa (tylko dla
+klientów, którzy mają usługę
+dostawy pobraniowej)
+
+order.details.dodData.cod
+
+Wymagane
+
+Kwota przesyłki za pobraniem
+
+order.details.additionalData
+
+Dodatkowe informacje
+
+order.details.additionalData.comment
+
+Wymagane
+
+Komentarz do zamówienia
+
+order.details.additionalData.extNo
+
+Wymagane
+
+Zewnętrzny numer zamówienia
+
+order.details.additionalData.invoiceBundle
+
+Wymagane
+
+Faktura zbiorcza
+
+order.details.additionalData.dontShipInvoice
+
+Wymagane
+
+Nie dostarczaj faktury
+
+order.details.additionalData.printComment
+
+Wymagane
+
+Drukuj komentarz na liście
+przewozowym
+
+order.items
+
+Lista zamówionych produktów
+
+order.items.product
+
+Wymagane
+
+Kod impaktu
+
+order.items.requireFullAmount
+
+Opcjonalne
+
+Złóż zamówienie tylko jeżeli
+pozycja dostępna jest w
+sprecyzowanej liczbie sztuk
+
+order.items.count
+
+Wymagane
+
+Liczba sztuk
+
+Strona 31 z 36
+
+Przykład żądania dla DOD:
+{
+"order": {
+"details": {
+"deliveryMethodId": "DOD",
+"dodData": {
+"city": "Mosina",
+"postalCode": "62-050",
+"street": "Lema",
+"streetNumber": "17",
+"phone": "000-000-000",
+"email": "developer@etrade.pl",
+"deliverToPerson": true,
+"firstName": "Adam",
+"lastName": "Grzegorczyk",
+"addCod": true,
+"cod": 15.05
+},
+"additionalData": {
+"comment": "Testowe zamówienie",
+"extNo": "1235790",
+"invoiceBundle": true,
+"dontShipInvoice": true,
+"printComment": true
+}
+},
+"items": [
+{
+"product": "Z19976",
+"requireFullAmount": true,
+"count": 3
+},
+{
+"product": "Z20217",
+"requireFullAmount": false,
+"count": 4
+}
+]
+}
+}
+
+3.12.2.​ Zamówienie z dostawą przez kuriera
+Dane żądania COURIER:
+
+Strona 32 z 36
+
+order.details.deliveryMe
+thodId
+
+Wymagane
+
+COURIER
+Metoda wysyłki zamówienia
+
+order.details.address
+
+Wymagane
+
+Id adresu klienta, patrz pkt “3.8 Pobieranie listy
+adresów”
+
+order.details.additional
+Data
+
+Dodatkowe informacje do zamówienia
+
+order.details.additional
+Data.comment
+
+Wymagane
+
+Komentarz do zamówienia
+
+order.details.additional
+Data.extNo
+
+Wymagane
+
+Zewnętrzny numer zamówienia
+
+order.details.additional
+Data.invoiceBundle
+
+Wymagane
+
+Faktura zbiorcza
+
+order.details.additional
+Data.dontShipInvoice
+
+Wymagane
+
+Nie dostarczaj faktury
+
+order.details.additional
+Data.printComment
+
+Wymagane
+
+Drukuj komentarz na liście przewozowym
+
+order.details.additional
+Data.phone
+
+Wymagane
+
+Numer telefonu dla kuriera
+
+order.items
+
+Lista zamówionych produktów
+
+order.items.product
+
+Wymagane
+
+Kod impaktu
+
+order.items.requireFull
+Amount
+
+Opcjonalne
+
+Złóż zamówienie tylko jeżeli pozycja dostępna jest w
+sprecyzowanej liczbie sztuk
+
+order.items.count
+
+Wymagane
+
+Liczba sztuk
+
+Przykład żądania dla COURIER:
+
+{
+"order": {
+"details": {
+"deliveryMethodId": "COURIER",
+"address": 179,
+"additionalData": {
+"comment": "Testowe zamówienie",
+"extNo": "1235790",
+"invoiceBundle": true,
+"dontShipInvoice": true,
+
+Strona 33 z 36
+
+"printComment": true,
+"phone": “123123123”
+}
+},
+"items": [
+{
+"product": "Z19976",
+"requireFullAmount": true,
+"count": 3
+},
+{
+"product": "Z20217",
+"requireFullAmount": false,
+"count": 4
+}
+]
+}
+}
+
+3.12.3.​ Zamówienie z odbiorem osobistym
+Dane żądania PERSONAL:
+order.details.deliveryMe
+thodId
+
+PERSONAL
+Metoda wysyłki zamówienia
+
+Wymagane
+
+order.details.additional
+Data
+
+Dodatkowe informacje do zamówienia
+
+order.details.additional
+Data.comment
+
+Wymagane
+
+Komentarz do zamówienia
+
+order.details.additional
+Data.extNo
+
+Wymagane
+
+Zewnętrzny numer zamówienia
+
+order.details.additional
+Data.invoiceBundle
+
+Wymagane
+
+Faktura zbiorcza
+
+order.details.additional
+Data.dontShipInvoice
+
+Wymagane
+
+Nie dostarczaj faktury
+
+order.details.additional
+Data.printComment
+
+Wymagane
+
+Drukuj komentarz na liście przewozowym
+
+order.items
+order.items.product
+
+Lista zamówionych produktów
+Wymagane
+
+Kod impaktu
+
+Strona 34 z 36
+
+order.items.requireFull
+Amount
+
+Opcjonalne
+
+Złóż zamówienie tylko jeżeli pozycja dostępna jest w
+sprecyzowanej liczbie sztuk
+
+order.items.count
+
+Wymagane
+
+Liczba sztuk
+
+Przykład żądania dla PERSONAL:
+
+{
+"order": {
+"details": {
+"deliveryMethodId": "PERSONAL",
+"additionalData": {
+"comment": "Testowe zamówienie",
+"extNo": "1235790",
+"invoiceBundle": true,
+"dontShipInvoice": true,
+"printComment": true
+}
+},
+"items": [
+{
+"product": "Z19976",
+"requireFullAmount": true,
+"count": 3
+},
+{
+"product": "Z20217",
+"requireFullAmount": false,
+"count": 4
+}
+]
+}
+}
+
+Przykład odpowiedzi:
+W przypadku poprawnie złożonego zamówienia w odpowiedzi zwracany jest id zamówienia
+{
+"id": "ZM-XX-XXXXX"
+}
+
+Strona 35 z 36
+
+W sytuacji, gdzie liczba sztuk w pozycji zamówienia z zaznaczoną opcją requireFullAmount
+przekracza dostępną liczbę sztuk na magazynie zamówienie nie zostanie złożone. W odpowiedzi
+zwrócony zostanie błąd wraz z informacją określającą, które produkty nie mogą zostać zamówione w
+wymaganej ilości.
+{
+"error": "Zapas Z19976 nie jest dostępny w wymaganej ilości"
+}
+
+W przypadku wystąpienia innych błędów zwracany jest kod 400 wraz z komunikatem błędu:
+{
+"error": "Invalid"
+}
+
+Strona 36 z 36
+
+

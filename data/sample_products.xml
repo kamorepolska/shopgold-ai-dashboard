@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 
+  Przykładowy plik XML w formacie Ceneo/ShopGold do testowania importu.
+  Importuj przez: PIM & SEO → "Importuj" → XML Plik → wybierz ten plik.
+-->
+<offers>
+  <o id="1001">
+    <name>Laptop ASUS VivoBook 15 Intel Core i5 16GB RAM 512GB SSD</name>
+    <category>Laptopy i netbooki</category>
+    <price>2999.00</price>
+    <desc>Wydajny laptop biznesowy z procesorem Intel Core i5-1235U, 16 GB pamięci RAM DDR4 i dyskiem SSD NVMe 512 GB. Wyposażony w matrycę IPS 15,6 cala Full HD o jasności 300 nitów. Bateria o pojemności 50 Wh zapewnia pracę do 8 godzin. Waga tylko 1,8 kg.</desc>
+    <url_photo>https://example.com/img/laptop-asus.jpg</url_photo>
+    <attrs>
+      <a name="Procesor">Intel Core i5-1235U</a>
+      <a name="RAM">16 GB DDR4</a>
+      <a name="Dysk">512 GB SSD NVMe</a>
+      <a name="Przekątna ekranu">15.6 cali</a>
+      <a name="Rozdzielczość">1920x1080 Full HD</a>
+      <a name="System operacyjny">Windows 11 Home</a>
+      <a name="Waga">1,8 kg</a>
+      <a name="Kolor">Czarny</a>
+    </attrs>
+  </o>
+  <o id="1002">
+    <name>Smartfon Samsung Galaxy A54 5G 128GB Fioletowy</name>
+    <category>Smartfony i telefony</category>
+    <price>1399.00</price>
+    <desc>Samsung Galaxy A54 5G to smartfon ze średniej półki cenowej z ekranem Super AMOLED 6,4 cala 120Hz i potrójnym aparatem 50+12+5 Mpx. Akumulator 5000 mAh z ładowaniem 25W. 5G, NFC, IP67.</desc>
+    <url_photo>https://example.com/img/samsung-a54.jpg</url_photo>
+    <attrs>
+      <a name="Procesor">Exynos 1380</a>
+      <a name="RAM">6 GB</a>
+      <a name="Pamięć wbudowana">128 GB</a>
+      <a name="Wyświetlacz">6,4 cala Super AMOLED 120Hz</a>
+      <a name="Aparat główny">50 Mpx</a>
+      <a name="Akumulator">5000 mAh</a>
+      <a name="Łączność">5G, WiFi 6, NFC, Bluetooth 5.3</a>
+      <a name="Wodoszczelność">IP67</a>
+      <a name="Kolor">Fioletowy</a>
+    </attrs>
+  </o>
+  <o id="1003">
+    <name>Słuchawki bezprzewodowe Sony WH-1000XM5 Czarne ANC</name>
+    <category>Słuchawki i zestawy audio</category>
+    <price>1249.00</price>
+    <desc>Flagowe słuchawki nauszne Sony z aktywną redukcją szumów nowej generacji. Czas pracy do 30 godzin, waga 250g, kodeki LDAC i AAC. Doskonałe do pracy zdalnej i podróży.</desc>
+    <url_photo>https://example.com/img/sony-xm5.jpg</url_photo>
+    <attrs>
+      <a name="Typ">Nauszne bezprzewodowe</a>
+      <a name="ANC">Tak, wielopunktowy</a>
+      <a name="Czas pracy na baterii">30 h</a>
+      <a name="Waga">250 g</a>
+      <a name="Kodeki">LDAC, AAC, SBC</a>
+      <a name="Połączenie">Bluetooth 5.2</a>
+      <a name="Kolor">Czarny</a>
+    </attrs>
+  </o>
+  <o id="1004">
+    <name>Ekspres do kawy DeLonghi Magnifica Start ECAM220.21.B</name>
+    <category>Ekspresy do kawy</category>
+    <price>1599.00</price>
+    <desc>Automatyczny ekspres ciśnieniowy DeLonghi z wbudowanym młynkiem ceramicznym. Przygotuje espresso, cappuccino i latte w zaledwie kilka sekund. Pojemność zbiornika na wodę 1,8 l. Ciśnienie 15 barów.</desc>
+    <url_photo>https://example.com/img/delonghi.jpg</url_photo>
+    <attrs>
+      <a name="Typ">Automatyczny z młynkiem</a>
+      <a name="Ciśnienie">15 bar</a>
+      <a name="Pojemność zbiornika na wodę">1.8 l</a>
+      <a name="Pojemność pojemnika na ziarna">250 g</a>
+      <a name="Moc">1450 W</a>
+      <a name="Kolor">Czarny</a>
+    </attrs>
+  </o>
+  <o id="1005">
+    <name>Rower elektryczny Kross Trans Hybrid 5.0 28 cali Grafitowy</name>
+    <category>Rowery elektryczne</category>
+    <price>5499.00</price>
+    <desc>Miejski rower elektryczny z silnikiem Bosch Active Plus 250W i akumulatorem 400 Wh. Zasięg do 120 km, 9-biegowa przerzutka Shimano Alivio, hydrauliczne hamulce tarczowe Shimano MT200. Rama aluminiowa, rozmiar M.</desc>
+    <url_photo>https://example.com/img/kross-ebike.jpg</url_photo>
+    <attrs>
+      <a name="Silnik">Bosch Active Plus 250W</a>
+      <a name="Akumulator">400 Wh</a>
+      <a name="Zasięg">do 120 km</a>
+      <a name="Przerzutka">Shimano Alivio 9-biegowa</a>
+      <a name="Hamulce">Hydrauliczne tarczowe Shimano MT200</a>
+      <a name="Rozmiar kół">28 cali</a>
+      <a name="Rama">Aluminium, rozmiar M</a>
+      <a name="Kolor">Grafitowy</a>
+    </attrs>
+  </o>
+  <o id="1006">
+    <name>Telewizor LG OLED 55C34LA 55 cali 4K HDR Smart TV</name>
+    <category>Telewizory</category>
+    <price>3799.00</price>
+    <desc>Telewizor OLED z matrycą 55 cali 4K UHD 120Hz. Obsługuje Dolby Vision IQ, HDR10, ATMOS. System operacyjny webOS 23 z Asystentem Google i Alexą. Cztery porty HDMI 2.1.</desc>
+    <url_photo>https://example.com/img/lg-oled.jpg</url_photo>
+    <attrs>
+      <a name="Przekątna">55 cali</a>
+      <a name="Rozdzielczość">4K UHD 3840x2160</a>
+      <a name="Panel">OLED</a>
+      <a name="Częstotliwość odświeżania">120 Hz</a>
+      <a name="HDR">Dolby Vision IQ, HDR10, HLG</a>
+      <a name="Dźwięk">Dolby Atmos 40W 2.2</a>
+      <a name="System">webOS 23</a>
+      <a name="HDMI">4x HDMI 2.1</a>
+    </attrs>
+  </o>
+  <o id="1007">
+    <name>Odkurzacz robot iRobot Roomba j7+ WiFi Czarny</name>
+    <category>Odkurzacze automatyczne</category>
+    <price>2299.00</price>
+    <desc>Inteligentny odkurzacz robot z technologią unikania przeszkód PrecisionVision. Automatyczna stacja opróżniania pojemnika. Mapowanie 3D pomieszczeń, integracja z Alexą i Google Home.</desc>
+    <url_photo>https://example.com/img/roomba-j7.jpg</url_photo>
+    <attrs>
+      <a name="Technologia nawigacji">PrecisionVision AI</a>
+      <a name="Stacja opróżniająca">Tak, automatyczna</a>
+      <a name="Mapowanie">3D SmartMap</a>
+      <a name="Czas pracy">75 min</a>
+      <a name="Poziom hałasu">64 dB</a>
+      <a name="Łączność">WiFi 2.4/5 GHz</a>
+      <a name="Kolor">Czarny</a>
+    </attrs>
+  </o>
+  <o id="1008">
+    <name>Kurtka zimowa Columbia Powder Lite Hooded Jacket Damska Navy M</name>
+    <category>Kurtki i płaszcze damskie</category>
+    <price>449.00</price>
+    <desc>Lekka kurtka puchopodobna Columbia z wypełnieniem syntetycznym Thermal Coil 133g. Wodoodporna powłoka Omni-Tech, kaptur z regulacją. Składa się do woreczka. Kolory: Navy, Różowy, Zielony.</desc>
+    <url_photo>https://example.com/img/columbia-jacket.jpg</url_photo>
+    <attrs>
+      <a name="Materiał zewnętrzny">100% Poliester</a>
+      <a name="Wypełnienie">Syntetyczne Thermal Coil 133g</a>
+      <a name="Wodoodporność">Omni-Tech</a>
+      <a name="Rozmiar">M</a>
+      <a name="Kolor">Granatowy (Navy)</a>
+      <a name="Waga">380 g</a>
+    </attrs>
+  </o>
+</offers>

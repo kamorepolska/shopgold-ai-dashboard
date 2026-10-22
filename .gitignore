@@ -1,0 +1,50 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Zmienne ùrodowiskowe
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Bazy danych SQLite
+**/*.db
+**/*.sqlite
+**/*.db-shm
+**/*.db-wal
+
+# Logi
+*.log
+logs/
+
+# Foldery tymczasowe i dane testowe
+temp/
+tmp/
+temp_also_unzipped/
+*.zip
+*.pdf
+*.csv
+
+# Duøe feedy XML (limit GitHub 100 MB)
+data/sourcing_uploads/*.xml
+data/idealpc/sourcing_uploads/*.xml
+
+# Pliki testowe i skrypty naprawcze
+scratch/
+test_*.js
+patch_*.js
+check_*.js
+fix_*.js
+diag_*.js
+
+# Edytory i IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Agent
+.gemini/

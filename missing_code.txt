@@ -1,0 +1,144 @@
+      if (logsExpanded) loadLogs(null, 'sup-logs-panel');
+    });
+
+    // Per-supplier refresh
+    document.querySelectorAll('.btn-refresh-supplier').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const sup = list.find(s => String(s.id) === String(id));
+        btn.innerHTML = '<span class="spin-inline"></span> Laduje...'; btn.disabled = true;
+        try {
+          let fd = null;
+          if (sup && sup.source_type === 'file') {
+            const inp = document.createElement('input'); inp.type='file'; inp.accept='.xlsx,.xls,.xml,.csv';
+            await new Promise(res => { inp.onchange = res; inp.click(); });
+            if (!inp.files[0]) { btn.innerHTML='🔄 Odswież'; btn.disabled=false; return; }
+            fd = new FormData(); fd.append('file', inp.files[0]);
+          }
+          const r = fd
+            ? await API.upload(`/sourcing/suppliers/${id}/refresh`, fd)
+            : await API.post(`/sourcing/suppliers/${id}/refresh`, {});
+          Toast.success(`✅ Wczytano ${r.imported} SKU`);
+          renderSuppliers();
+        } catch(e) { Toast.error(e.message); btn.innerHTML='🔄 Odswież'; btn.disabled=false; }
+      });
+    });
+
+    // Replace file
+    document.querySelectorAll('.btn-replace-file').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        const inp = document.createElement('input'); inp.type='file'; inp.accept='.xlsx,.xls,.xml,.csv';
+        await new Promise(res => { inp.onchange = res; inp.click(); });
+        if (!inp.files[0]) return;
+        btn.disabled = true; btn.textContent = '⏳ Zastepuje...';
+        try {
+          const fd = new FormData(); fd.append('file', inp.files[0]);
+          const r = await API.upload(`/sourcing/suppliers/${id}/replace-file`, fd);
+          Toast.success(`✅ Plik zastapiony — wczytano ${r.imported} SKU`);
+          renderSuppliers();
+        } catch(e) { Toast.error(e.message); btn.disabled=false; btn.textContent='📂 Zastąp plik'; }
+      });
+    });
+
+    // Config (currency, rate, col_settings)
+    document.querySelectorAll('.btn-config-supplier').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        Modal.show({
+          title: `⚙️ Ustawienia: ${escHtml(btn.dataset.name)}`,
+          body: `<div style="display:flex;flex-direction:column;gap:12px">
+            <div class="form-group"><label class="form-label">Waluta cennika</label>
+              <select class="form-select" id="cfg-currency">
+                ${['PLN','EUR','USD','CZK','GBP','HUF','RON'].map(c=>`<option value="${c}"${btn.dataset.currency===c?' selected':''}>${c}</option>`).join('')}
+              </select></div>
+            <div class="form-group"><label class="form-label">Kurs reczny (0 = automatyczny NBP)</label>
+              <input class="form-input" id="cfg-rate" type="number" step="0.0001" min="0" value="${btn.dataset.rate||0}"></div>
+            <div class="form-group"><label class="form-label">Ustawienia kolumn (JSON)</label>
+              <textarea class="form-input" id="cfg-cols" style="min-height:80px;font-family:monospace;font-size:.78rem" placeholder='{"ean_field":"EAN","price_field":"CenaNetto","avail_field":"Dostepnosc","mfg_field":"Producent"}'></textarea>
+              <div style="font-size:.72rem;color:var(--text-muted);margin-top:4px">Klucze: ean_field, price_field, avail_field, name_field, mfg_field</div>
+            </div>
+            ${btn.dataset.stype === 'url' ? `<div style="border-top:1px solid var(--border);padding-top:10px">
+              <div style="font-size:.75rem;font-weight:700;color:var(--text-muted);margin-bottom:6px">🔐 Logowanie HTTP (opcjonalne)</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                <div class="form-group"><label class="form-label">Login</label><input class="form-input" id="cfg-url-user" value="${escHtml(btn.dataset.urluser||'')}"></div>
+                <div class="form-group"><label class="form-label">Hasło</label><input class="form-input" id="cfg-url-pass" type="password" value="${escHtml(btn.dataset.urlpass||'')}"></div>
+              </div>
+            </div>` : ''}
+          </div>`,
+          footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Anuluj</button>
+                   <button class="btn btn--primary" id="cfg-save-btn" onclick="SourcingView._saveSupConfig('${id}')">Zapisz</button>`
+        });
+        const cs = list.find(s=>String(s.id)===String(id))?.col_settings;
+        if(cs && cs!=='{}') document.getElementById('cfg-cols').value = cs;
+      });
+    });
+
+    // Logs per supplier
+    document.querySelectorAll('.btn-logs-supplier').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.id;
+        Modal.show({
+          title: `📋 Logi: ${escHtml(btn.dataset.name)}`,
+          body: `<div id="modal-logs-content"><div style="color:var(--text-muted)">Ladowanie...</div></div>`,
+          footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>`
+        });
+        loadLogs(id, 'modal-logs-content');
+      });
+    });
+
+    // Delete
+    document.querySelectorAll('.btn-del-supplier').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Usunac te hurtownie i jej cennik?')) return;
+        try { await API.del(`/sourcing/suppliers/${btn.dataset.id}`); Toast.success('Usunieto'); renderSuppliers(); }
+        catch(e) { Toast.error(e.message); }
+      });
+    });
+
+    // Schedule
+    document.querySelectorAll('.btn-schedule-supplier').forEach(btn => {
+      btn.addEventListener('click', () => showScheduleModal(btn.dataset.id, btn.dataset.name, btn.dataset.cron, btn.dataset.enabled === '1'));
+    });
+
+    // Extra Files
+    document.querySelectorAll('.btn-files-supplier').forEach(btn => {
+      btn.addEventListener('click', () => showFilesModal(btn.dataset.id, btn.dataset.name));
+    });
+
+    // Add supplier
+    document.getElementById('sup-add-btn')?.addEventListener('click', async () => {
+      const name = document.getElementById('sup-name').value.trim();
+      const url  = document.getElementById('sup-url').value.trim();
+      const fileInp = document.getElementById('sup-file-input');
+      const currency = document.getElementById('sup-currency').value;
+      const rate = document.getElementById('sup-rate').value;
+      if (!name) { Toast.error('Podaj nazwe hurtowni'); return; }
+      if (_sourceType==='url'  && !url) { Toast.error('Podaj URL do cennika'); return; }
+      if (_sourceType==='file' && !fileInp.files[0]) { Toast.error('Wybierz plik cennika'); return; }
+      if (_sourceType==='ftp'  && !document.getElementById('sup-ftp-host')?.value.trim()) { Toast.error('Podaj host FTP'); return; }
+      if (_sourceType==='ftp'  && !document.getElementById('sup-ftp-path')?.value.trim()) { Toast.error('Podaj sciezke pliku FTP'); return; }
+      setBtn('sup-add-btn', true);
+      try {
+        const fd = new FormData();
+        fd.append('name', name); fd.append('source_type', _sourceType);
+        fd.append('currency', currency); fd.append('exchange_rate', rate);
+        if (_sourceType==='url') {
+          fd.append('source_url', url);
+          fd.append('url_user', document.getElementById('sup-url-user')?.value.trim()||'');
+          fd.append('url_pass', document.getElementById('sup-url-pass')?.value||'');
+        }
+        if (_sourceType==='file') fd.append('file', fileInp.files[0]);
+        if (_sourceType==='ftp') {
+          fd.append('ftp_host',   document.getElementById('sup-ftp-host').value.trim());
+          fd.append('ftp_port',   document.getElementById('sup-ftp-port').value || '21');
+          fd.append('ftp_user',   document.getElementById('sup-ftp-user').value.trim());
+          fd.append('ftp_pass',   document.getElementById('sup-ftp-pass').value);
+          fd.append('ftp_path',   document.getElementById('sup-ftp-path').value.trim());
+          fd.append('ftp_secure', document.getElementById('sup-ftp-secure').checked ? '1' : '0');
+        }
+        await API.upload('/sourcing/suppliers', fd);
+        Toast.success('✅ Hurtownia dodana i cennik wczytany');
+        renderSuppliers();
+      } catch(e) { Toast.error(e.message); setBtn('sup-add-btn', false); }
+    });

@@ -1,0 +1,257 @@
+Nagłówki HTTP:
+
+ActionCustomerId - Id klienta w Action
+ActionUserName - login konta do platformy iserwis, z którego będa pobierane pliki
+ActionXmlAuthKey - unikalny klucz uwierzytelniający (do wygenerowania w is3.action.pl/dataexchange)
+Poniżej znajduje się przykład zapytania cUrl do pobrania cenika z nagłówkami uwierzytelniającymi:
+
+                curl -X GET \
+                    [URL CENNIKA] \
+                    -H 'ActionCustomerId: [CUSTOMER_ID]' \
+                    -H 'ActionUserName: [LOGIN]' \
+                    -H 'ActionXmlAuthKey: [UNIQUE_KEY]' 
+            
+Parametry Query String:
+
+ActionCustomerId - Id klienta w Action
+ActionUserName - login konta do platformy iserwis, z którego będa pobierane pliki
+ActionXmlAuthKey - unikalny klucz uwierzytelniający (do wygenerowania poniżej)
+Przykład:
+
+                [URL CENNIKA]?ActionCustomerId=[CUSTOMER_ID]&ActionUserName=[LOGIN]&ActionXmlAuthKey=[UNIQUE_KEY]
+            
+Dane uwierzytelniające muszą być URL ENCODED
+
+
+
+
+Duży cennik XML z cenami, stanami i pełnymi opisami produktów - do pobrania 8 razy na dobę 
+https://xml.action.pl/Export_XMLIcecat.aspx?ActionCustomerId=04716&ActionUserName=ideal3948&ActionXmlAuthKey=RdugnArLGFwFKqQhHEFKkf9QJoHWGQh9GCyALXGL6E4%3d&Language=pl&Currency=PLN
+
+Mały cennik XML do aktualizacji stanów i cen - nielimitowana ilość pobrań 
+https://xml.action.pl/Export_ShortXMLIcecat.aspx?ActionCustomerId=04716&ActionUserName=ideal3948&ActionXmlAuthKey=RdugnArLGFwFKqQhHEFKkf9QJoHWGQh9GCyALXGL6E4%3d&Language=pl&Currency=PLN
+
+Mały cennik CSV do aktualizacji stanów i cen - nielimitowana ilość pobrań 
+https://xml.action.pl/Export_CSV.aspx?ActionCustomerId=04716&ActionUserName=ideal3948&ActionXmlAuthKey=RdugnArLGFwFKqQhHEFKkf9QJoHWGQh9GCyALXGL6E4%3d&Language=pl&Currency=PLN
+
+Mały cennik XLSX do aktualizacji stanów i cen - nielimitowana ilość pobrań 
+https://xml.action.pl/Export_Xlsx.aspx?ActionCustomerId=04716&ActionUserName=ideal3948&ActionXmlAuthKey=RdugnArLGFwFKqQhHEFKkf9QJoHWGQh9GCyALXGL6E4%3d&Language=pl&Currency=PLN
+
+Mały cennik XLS do aktualizacji stanów i cen - nielimitowana ilość pobrań 
+https://xml.action.pl/Export_Excel.aspx?ActionCustomerId=04716&ActionUserName=ideal3948&ActionXmlAuthKey=RdugnArLGFwFKqQhHEFKkf9QJoHWGQh9GCyALXGL6E4%3d&Language=pl&Currency=PLN
+
+
+
+"Duży" XML
+Url do cennika:
+
+xml.action.pl/Export_XMLIcecat.aspx
+
+Cennik ten zawiera pełną ofertę zawierającą linki do zdjęć, opisy i wiele innych
+
+
+Uwaga!
+
+Dostęp do XMLa wymaga specjalnego uprawnienia, które jest nadawane przez handlowca
+
+Ilość pobrań tego cennika jest ograniczona do 8miu razy na dobę
+
+
+Poniższe linki kierują do pobrania cenników w języku polskim oraz w walucie PLN. Aby pobrać cennik w innej walucie i/lub języku należy dodać odpowiedni parametr QuryString zgodnie z wcześniej załączoną instrukcją (konfiguracja)
+
+Przykładowy cennik:
+
+Pobierz Duży XML (kliknij)
+
+
+Schemat dużego XML
+
+        <?xml version="1.0" encoding="utf-8" ?>
+        <Catalog>(główny węzeł tzw. Korzeń)
+            <Categories>(rozpoczyna się lista kategorii)
+                <MainCategory id="SIE"(id kategorii głównej) nazwa="AGD"(nazwa kategorii)>
+                    <SubCategories>(podkategorie)
+                        <SubCategory id="SIE-BAK"(id podkategorii) nazwa="AGD - Produkty"(nazwa podkategorii) />
+                    </SubCategories> (zamkniecie listy podkategorii)
+                </MainCategory> (zamkniecie kategorii głównej)
+            </Categories> (zamkniecie listy kategorii)
+            <Producers>(lista producentów)
+                <Producer id="TEL"(id producenta) name="Telegaertner" (nazwa producenta) />
+                <Producer  id="TER" name="TERRATEC" />
+                <Producer  id="THE" name="Thermaltake" />
+                <Producer  id="XPE" name="XpertVision" />
+                <Producer  id="YAD" name="Yamada" />
+            </Producers> (zamkniecie listy producentów)
+            <Products> (lista produktów)
+                <Product id="SIEEDIBAK0006" (kod produktu)
+                    name="EDIMAX EW-7203APG Acces Point 54Mbps 802.11g, 1xLAN" (nazwa produktu)
+                    producer="EDI" (id producenta)
+                    categoryId="11"(id kategorii)
+                    priceNet="153.03"(cena netto)
+                    vat="23"(stawka podatku  vat)
+                    vat_type="zwykły"(rodzaj podatku  vat)
+                    pkwiu="00.00.00.0"(kod PKWiU)
+                    srp="190.00"[Parametr opcjonalny]( sugerowana cena detaliczna z VAT)
+                    date="2005-02-25"(data dodania produktu do oferty action)  
+                    warranty="G024M"(oznaczenie czasu gwarancji)
+                    available="25"(obecny stan magazynowy dla liczby <= 30 lub napis ponad 30 dla liczby >30)
+                    onOrder="N"(produkt na zamówienie)
+                    specialOffer="N" (produkt w ofercie specjalnej)
+                    smallPallet="N”(czy produkt może być wysłany na małej palecie)
+                    productIsLarge="N” (czy produkt jest towarem wielkogabarytowym)
+                    manufacturerPartNumber="kod producenta” (kod producenta)
+                    EAN="ean” (kod EAN)
+                    sizeWidth="60” (szerokość)
+                    sizeLength="100” (długość)
+                    sizeHeight="150” (wysokość)
+                    weight="1000” (waga)
+                    sizeMeasurementUnit="mm” (jednostka wymiarów)
+                    weightMeasurementUnit="g” (jednostka wagi)
+                    saleReason="TEXT” ([atrybut opcjonalny] powód wyprzedaży)
+                    dimensionalWeight="1000”> (waga gabarytowa)
+                    additionalAvailabilityInfo="48H”> (dodatkowe informacje o dostępności)
+                    shippingTimeInHour="48" (Czas dostawy w godzinach)
+                    ETA="30.09.2022" (data spodziewanej dostawy)
+                    incomingStock="14" (ilość towaru w nadchodzącej dostawie)
+                    mainCategoryTree="Dom, warsztat i ogór " (nadgrupa drzewo)
+                    categoryTree="Narzędzia - osprzęt" (grupa drzewo)
+                    subCategoryTree="Akumulatory" (podgrupa drzewo)
+                    
+                    <Images> (zdjecia)
+                        <Image
+                            url="[URL do zdjęcia]"(ścieżka do pliku, używana przy wywoływaniu zdjęć - relatywna)
+                            isMain="1"(zdjęcie domyślne)
+                            date="2006-12-01"(data dodania zdjęcia) 
+                            copyright="1"(zdjęcie własne) />
+                    </Images> (koniec listy zdjęć)
+                    <Multimedia> (pliki dodatkowe - instrukcje obsługi/specyfikacje itp.)
+                        <MultimediaItem
+                            url="[url absolutny do pliku]" (url do pobrania pliku)
+                            description="Instrukcja obsługi"(nazwa/opis pliku)
+                            type="manual pdf"(rodzaj pliku)
+                            copyright="1"(plik własny) />
+                    </Multimedia> (zamkniecie sekcji z plikami dodatkowymi)
+                    <TechnicalSpecification> (opis techniczny)
+                        <Section name="Design"> (sekcja opisu wraz z jej nazwą)
+                            <Parameters"> ([tag opcjonalny] parametry sekcji o ile istnieją)
+                                  <Parameter name="[NAZWA]" (nazwa parametru)
+                                        value="[WARTOŚĆ]"(wartość parametru - string)
+                                  />
+                            </Parameters> 
+                            <Attributes"> ([tag opcjonalny] atrybuty sekcji o ile istnieją)
+                                  <Attribute name="[NAZWA]" (nazwa atrybutu)
+                                      <Values> (wartości atrybutu)
+                                          <Value name="[WARTOŚĆ]"> (wartość atrybutu)
+                                          />
+                                      </Values> 
+                                </Attribute> 
+                            </Attributes> 
+                        </Section> 
+                    </TechnicalSpecification> (zamkniecie sekcji z opisem technicznym)
+                </Product> (zamknięcie produktu)
+            </Products> (zamknięcie listy produktów)
+        </Catalog> (końcowy znacznik tego dokumentu xml)
+    
+
+Oznaczenia gwarancji
+
+B000M - Brak gwarancji
+E024M - Fabryczna Gwarancja Europejska 24 m-ce
+F000M - Fabryczna Gwarancja
+F001M - Fabryczna Gwarancja 1 miesiąc
+F003M - Fabryczna Gwarancja 3 miesiące
+F004M - Fabryczna Gwarancja 4 miesiące
+F006M - Fabryczna Gwarancja 6 miesięcy
+F012M - Fabryczna Gwarancja 12 miesięcy
+F018M - Fabryczna Gwarancja 18 miesięcy
+F024M - Fabryczna Gwarancja 24 miesiące
+F036M - Fabryczna Gwarancja 36 miesięcy
+F048M - Fabryczna Gwarancja 48 miesięcy
+F060M - Fabryczna Gwarancja 60 miesięcy
+F072M - Fabryczna Gwarancja 72 miesiące
+F084M - Fabryczna Gwarancja 84 miesiące
+F096M - Fabryczna Gwarancja 96 miesięcy
+F120M - Fabryczna Gwarancja 120 miesięcy
+F144M - Fabryczna Gwarancja 144 miesiące
+F180M - Fabryczna Gwarancja 180 miesięcy
+F216M - Fabryczna Gwarancja 216 miesięcy
+F240M - Fabryczna Gwarancja 240 miesięcy
+F300M - Fabryczna Gwarancja 300 miesięcy
+G001M - Gwarancja 1 miesiąc
+G003M - Gwarancja 3 miesiące
+G005M - Gwarancja 5 miesięcy
+G006M - Gwarancja 6 miesięcy
+G009M - Gwarancja 9 miesięcy
+G012M - Gwarancja 12 miesięcy
+G021M - Gwarancja 21 miesięcy
+G024M - Gwarancja 24 miesiące
+G026M - Gwarancja 26 miesięcy
+G030M - Gwarancja 30 miesięcy
+G036M - Gwarancja 36 miesięcy
+G048M - Gwarancja 48 miesięcy
+G060M - Gwarancja 60 miesięcy
+G072M - Gwarancja 72 miesięcy
+G084M - Gwarancja 84 miesięcy
+G096M - Gwarancja 96 miesięcy
+G099M - Gwarancja 99 miesięcy
+G120M - Gwarancja 120 miesięcy
+G144M - Gwarancja 144 miesiące
+G180M - Gwarancja 180 miesięcy
+G300M - Gwarancja 300 miesięcy
+G360M - Gwarancja 360 miesięcy
+R001M - Rękojmia 1 miesiąc
+R003M - Rękojmia 3 miesiące
+R012M - Rękojmia 12 miesięcy
+R024M - Rękojmia 24 miesiące
+R034M - Rękojmia 34 miesiące
+R036M - Rękojmia 36 miesięcy
+R048M - Rękojmia 48 miesięcy
+R060M - Rękojmia 60 miesięcy
+R099M - Rękojmia 99 miesięcy
+W000M - Gwarancja Wieczysta
+
+"Mały" XML
+Url do cennika:
+
+xml.action.pl/Export_ShortXMLIcecat.aspx
+
+Cennik ten zawiera podstawowe informacje pozwalające na aktualizację cen i stanów
+
+
+Uwaga!
+
+Dostęp do XMLa wymaga specjalnego uprawnienia, które jest nadawane przez handlowca
+
+Ilość pobrań tego cennika jest nieograniczona i zalecamy pobieranie tego cennika co 30 min
+
+
+Poniższe linki kierują do pobrania cenników w języku polskim oraz w walucie PLN. Aby pobrać cennik w innej walucie i/lub języku należy dodać odpowiedni parametr QuryString zgodnie z wcześniej załączoną instrukcją (konfiguracja)
+
+Example price list:
+
+Pobierz Mały XML (kliknij)
+
+
+Schemat małego XML
+
+            <?xml version="1.0" encoding="utf-8" ?>
+            <Catalog>(główny węzeł tzw. Korzeń)
+                <Products> (lista produktów)
+                    <Product
+                        id="SIEALLBAK0002" Id produktu
+                        name="[NAZWA]"(nazwa produktu)
+                        priceNet="123"(cena netto)
+                        srp="180,50" [Parametr opcjonalny]
+                        available="7"(obecny stan magazynowy dla liczby <= 30 lub napis ponad 30 dla liczby >30)
+                        vat="23"(stawka podatku vat)
+                        vat_type="zwykły"(rodzaj podatku vat)
+                        EAN="ean” (kod EAN)
+                        categoryId="DLZ-KSP" (id kategorii)
+                        additionalAvailabilityInfo="48h" (dodatkowe informacje o dostępności)
+                        shippingTimeInHour="48" (czas dostawy w godzinach)
+                        ETA="30.09.2022" (data spodziewanej dostawy)
+                        incomingStock="14" (ilość towaru w nadchodzącej dostawie)
+                        />
+                </Products>
+            </Catalog>
+    

@@ -1,0 +1,39 @@
+
+
+Category.xml - jest to mapa kategorii dla pliku complex.xml. To jest taki sam układ, jak produkty są przypisane na stronie Akyga.com. Może to pomóc w mapowaniu poszczególnych kategorii do systemu klienta. Uwaga: produkt można znaleźć w więcej niż 1 kategorii!
+
+ 
+
+Simple.xml - jest to bardzo uproszczona i lekka forma pliku integracji. Nie zawiera opisów produktów i atrybutów - istnieje tylko krótki opis w języku polskim. Ten plik jest jednak zalecany do synchronizacji cen i ilości ze względu na ich dynamiczną zmianę. Ten plik jest generowany znacznie szybciej. Tagi są identyczne, ale jest ich mniej niż plik złożony.
+
+ 
+
+Complex.xml - To jest główny plik integracji. Zawiera wszystkie dane o dostarczonym przez nas produkcie. Możliwe jest na przykład mapowanie wszystkich cech produktów z filtrami używanymi w sklepie internetowym w kilku dostępnych językach. Zawiera wszystkie języki, w których mamy tłumaczenia w aktualnej wersji. Posiada dobrej jakości zdjęcia i inne dokumenty.
+
+ 
+
+CSV.xml - W pliku przekazywane są wyłącznie stany magazynowe oraz kod producenta.
+
+ 
+
+Unikalnym kluczem do produktów jest <sku>. To jest nasz wewnętrzny kod. Nie umieszczaj tego kodu jako wartości widocznej dla klientów.
+
+Właściwym kodem produktu do prezentacji dla klientów jest <manufacturerCode>. To także wyjątkowa wartość.
+
+ 
+
+<price> - To jest cena netto oferowana przez Akyga
+
+<priceGross> - jest to cena zawierająca podatek VAT (dotyczy tylko polskich klientów)
+
+<priceRetail> - sugerowana cena detaliczna netto w PLN
+
+<priceRetailEuro> - sugerowana cena detaliczna netto w EUR
+
+<qty> - dostępna ilość
+
+<delivery> - dostępna ilość w najbliższej dostawie
+
+<deliveryDate> - data najbliższej dostawy.
+
+Jeśli cena wynosi 0,00 - oznacza brak wartości.

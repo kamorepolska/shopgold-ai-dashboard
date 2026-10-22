@@ -1,0 +1,518 @@
+{
+  "inCatAttr": [],
+  "viaAlias": [],
+  "inRaw": [],
+  "missing": [
+    {
+      "name": "Cache L2",
+      "productCount": 1,
+      "exampleValues": [
+        "12000KB"
+      ]
+    },
+    {
+      "name": "Cache procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "16MB",
+        "38MB",
+        "32MB",
+        "64MB",
+        "144MB"
+      ]
+    },
+    {
+      "name": "Category Code",
+      "productCount": 6,
+      "exampleValues": [
+        "CPU"
+      ]
+    },
+    {
+      "name": "CnCode",
+      "productCount": 6,
+      "exampleValues": [
+        "85423190"
+      ]
+    },
+    {
+      "name": "Częstotliwość bazowa procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "3.8GHz",
+        "3.9GHz",
+        "3.7GHz",
+        "4.7GHz",
+        "4.3GHz"
+      ]
+    },
+    {
+      "name": "Data premiery",
+      "productCount": 1,
+      "exampleValues": [
+        "9/15/2022"
+      ]
+    },
+    {
+      "name": "DDR3 1600/1333/1066/800",
+      "productCount": 4,
+      "exampleValues": [
+        "100-000001405",
+        "100-100000589WOF",
+        "100-100000719WOF",
+        "100-100001015MPK"
+      ]
+    },
+    {
+      "name": "Dedykowana karta graficzna",
+      "productCount": 6,
+      "exampleValues": [
+        "Nie"
+      ]
+    },
+    {
+      "name": "Description",
+      "productCount": 5,
+      "exampleValues": [
+        "<p><b>AMD Ryzen 5 9600X</b><br>Pure Gaming Performance</p>",
+        "<p><b>Game with the Best</b><br>6 incredible cores for those who just want to game.<br><br><b>The Fastest in the Game1</b><br>Get the high-speed gaming performance of the world’s best desktop processor.<br><br><b>AMD StoreMI Technology</b><br>A fast and easy way to expand and accelerate the storage in a desktop PC with an AMD Ryzen™ processor.<br><br><b>AMD Ryzen™ Master Utility</b><br>The Simple and Powerful Overclocking Utility for AMD Ryzen™ processors.§<br><br><b>AMD Ryzen™ VR-Ready Premium</b><br>For the best possible VR experiences, AMD offers select Ryzen™ VR-Ready Premium processors.</p><p>Testing by AMD performance labs as of 9/2/2020 based on the average FPS of 40 PC games at 1920x1080 with the High image quality preset using an AMD Ryzen™ 9 5900X processor vs. Core i9-10900K. Results may vary. R5K-002<br>§There are many exciting opportunities available from our retailers. Please click on the offer to visit the retailer website for more information. AMD is not responsible for the contents of these ads, including any typographical or photographic errors. Price and specifications are subject to change without notice and may vary from what is listed on the vendor website. Additional terms and conditions may apply.</p>",
+        "<p><b>This Changes Everything<br>The most advanced PC processor for gamers and creators.1 </b><br><br>Welcome to the new era of performance. AMD Ryzen 7000 Series ushers in the speed of “Zen 4” for gamers and creators with pure power to tackle any game or workflow on the digital playground. The world’s most advanced PC processor1 for gamers and creators extends AMD performance leadership to power your PC. <br><br><b>Change How You Game</b><br>When your PC has the world’s most advanced desktop processor for gamers, you can focus on what really matters: being victorious on the digital battlefield. Whether you’re playing the latest titles or revisiting a classic, the AMD Ryzen™ 7000 Series processors are a gaming powerhouse with high-performance “Zen 4” cores. With up to 16 cores, 32 threads, boost clocks of up to 5.7GHz2 and up to 80MB of cache, AMD Ryzen 7000 Series processors deliver game changing performance. <br><br><b>The Latest Technologies</b><br>Whether you are 3D rendering a high poly scene, exporting massive video files, or visualizing an architectural dream, AMD Ryzen™ 7000 Series processors are built to beat the clock. With time-saving connectivity like PCIe® 5.0 storage support, ultra-fast WiFi® 6E, AMD EXPO™ technology, up to 32 processing threads, and dedicated video accelerators3, elevate your experience with AMD Ryzen 7000 Series processors.<br><br><b>Elevate Your Processing Power</b><br>AMD Ryzen™ processors have bleeding-edge technologies to support and keep you in the game.<br><br><b>Easy Overclocking, Game On4</b><br>Accelerate your gaming with AMD EXPO™ technology. Higher memory frequencies and more aggressive settings can unlock higher and smoother frame rates in your favorite games.<br><br><b>Precision Boost 2<br>Boost performance when you need it</b><br>Precision Boost 2 automatically raises processor frequencies for supercharged performance when you need it most.<br><br><b>Precision Boost Overdrive<br>Making Precision Boost 2 Even Better</b><br>Precision Boost Overdrive5 uses your motherboard’s robust design to boost clock speeds higher and longer, and lets you overclock2 at the touch of a button.<br><br><b>Unlocked for Overclocking6<br>Control your processing power</b><br>Tweak and tune your AMD Ryzen processor for personalized performance using the robust AMD Ryzen Master utility.<br><br><b>The Future Of Ryzen™ Processors<br>Get fast “Zen 4” performance with AMD Socket AM5 motherboards.</b><br>The all-new AMD Ryzen 7000 Series processors are packed with state-of-the-art technologies for an effortlessly modern PC. Highlights include high-speed DDR5 memory, PCIe® 5.0 support, AMD EXPO™ one-touch memory overclocking, and hyper-efficient 5nm manufacturing. Put an AMD Socket AM5 motherboard at the heart of your rig to dominate the games you love today and tomorrow. If your PC needs the latest and greatest capabilities, insist on AMD Ryzen™ processors.</p><p>1. Based on 5nm process node as of August 2022.  <br>2. Max boost for AMD Ryzen processors is the maximum frequency achievable by a single core on the processor running a bursty single-threaded workload. Max boost will vary based on several factors, including, but not limited to: thermal paste; system cooling; motherboard design and BIOS; the latest AMD chipset driver; and the latest OS updates. GD-150. <br>3. Video codec acceleration (including at least the HEVC (H.265), H.264, VP9, and AV1 codecs) is subject to and not operable without inclusion/installation of compatible media players. GD-176 <br>4. Overclocking and/or undervolting AMD processors and memory, including without limitation, altering clock frequencies / multipliers or memory timing / voltage, to operate outside of AMD’s published specifications will void any applicable AMD product warranty, even when enabled via AMD hardware and/or software. This may also void warranties offered by the system manufacturer or retailer. Users assume all risks and liabilities that may arise out of overclocking and/or undervolting AMD processors, including, without limitation, failure of or damage to hardware, reduced system performance and/or data loss, corruption or vulnerability. GD-106. <br>5. Precision Boost Overdrive requires a compatible AMD Ryzen Threadripper, 3rd Gen AMD Ryzen processor, or Ryzen 5000 Series processor and a motherboard compatible with one or more of these processors. 2nd Gen AMD Ryzen processors including the Ryzen 3200G processor are not compatible with Precision Boost Overdrive. Because Precision Boost Overdrive enables operation of the processor outside of specifications and in excess of factory settings, use of the feature invalidates the AMD product warranty and may also void warranties offered by the system manufacturer or retailer. GD-135.<br>6. AMD’s product warranty does not cover damages caused by overclocking, even when overclocking is enabled via AMD hardware and/or software. GD-26.<br>7. Testing as of 15 August, 2022, by AMD Performance Labs using the following hardware: AMD Socket AM5 Reference Motherboard with AMD Ryzen™ 9 7950X, Ryzen™ 9 7900X, Ryzen™ 5 7600X and G.Skill DDR5-6000C30 (F5-6000J3038F16GX2-TZ5N) with AMD EXPO™; versus AMD Socket AM4 Reference Motherboard with Ryzen™ 9 5950X, Ryzen™ 9 5900X, Ryzen™ 5 5600X; versus ROG Maximus Z690 Hero with Core i9-12900K and G.Skill DDR5-6000C30 (F5-6000J3038F16GX2-TZ5N) with AMD EXPO™ loaded. ALL SYSTEMS configured with NXZT Kraken X63, open air test bench, Radeon™ RX 6950XT (driver 22.7.1 Optional), Windows® 11 22000.856, AMD Smart Access Memory/PCIe® Resizable Base Address Register (“ReBAR”) ON, Virtualization-Based Security (VBS) OFF. All games tested at 1920x1080 with HIGH in-game preset and the chronologically newest graphics industry API available within the game’s rendering engine (e.g. Vulkan® over OpenGL™, DirectX® 12 over DirectX® 11). Results may vary. RPL-007</p>",
+        "<p>The ultimate 16-core desktop CPU with 2nd gen AMD 3D V-Cache™ Technology that can do it all with incredible performance for the most demanding gamers and creators.<br><br></p>",
+        "<p><b>Powerful Gaming Starts Here</b><br>This overclockable processor is built for intense gaming, and comes bundled with a low-profile AMD Wraith Stealth cooler.1</p>"
+      ]
+    },
+    {
+      "name": "Dynamiczne taktowanie wbudowanej karty graficznej (max)",
+      "productCount": 2,
+      "exampleValues": [
+        "2200MHz"
+      ]
+    },
+    {
+      "name": "Generowanie procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "AMD Ryzen 5000 Series",
+        "AMD Ryzen 9000 Series",
+        "AMD Ryzen 7000 Series"
+      ]
+    },
+    {
+      "name": "Gniazdo procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "Socket AM4",
+        "Gniazdo AM5"
+      ]
+    },
+    {
+      "name": "Ilość portów USB",
+      "productCount": 3,
+      "exampleValues": [
+        "5",
+        "4"
+      ]
+    },
+    {
+      "name": "Ilość w opakowaniu",
+      "productCount": 6,
+      "exampleValues": [
+        "60",
+        "36",
+        "1",
+        "4",
+        "12"
+      ]
+    },
+    {
+      "name": "Instrukcje obsługiwania",
+      "productCount": 2,
+      "exampleValues": [
+        "AES/AVX/AVX 2.0/AVX-512/SSE/SSE2/SSE3/SSE4.1/SSE4.2/SSSE3"
+      ]
+    },
+    {
+      "name": "Jednostkowa waga brutto",
+      "productCount": 6,
+      "exampleValues": [
+        "0.058kg",
+        "0.072kg",
+        "0.43kg",
+        "0.3kg",
+        "0.092kg"
+      ]
+    },
+    {
+      "name": "Karta graficzna on-board",
+      "productCount": 6,
+      "exampleValues": [
+        "Tak",
+        "Nie"
+      ]
+    },
+    {
+      "name": "Kod zharmonizowanego systemu (HS)",
+      "productCount": 2,
+      "exampleValues": [
+        "85423119"
+      ]
+    },
+    {
+      "name": "Konfigurowalne niższe TDP",
+      "productCount": 1,
+      "exampleValues": [
+        "45W"
+      ]
+    },
+    {
+      "name": "Konfigurowalne wyższe TDP",
+      "productCount": 1,
+      "exampleValues": [
+        "65W"
+      ]
+    },
+    {
+      "name": "Korekcja ECC",
+      "productCount": 3,
+      "exampleValues": [
+        "Tak"
+      ]
+    },
+    {
+      "name": "Liczba rdzeni procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "8",
+        "6",
+        "12",
+        "16"
+      ]
+    },
+    {
+      "name": "Liczba wątków",
+      "productCount": 6,
+      "exampleValues": [
+        "16",
+        "12",
+        "24",
+        "32"
+      ]
+    },
+    {
+      "name": "Litografia procesora",
+      "productCount": 5,
+      "exampleValues": [
+        "7nm",
+        "4nm",
+        "5nm"
+      ]
+    },
+    {
+      "name": "Maksymalna liczba linii PCI Express",
+      "productCount": 2,
+      "exampleValues": [
+        "28"
+      ]
+    },
+    {
+      "name": "Maksymalna pamięć wewnętrzna wspierana przez procesor",
+      "productCount": 3,
+      "exampleValues": [
+        "192GB",
+        "128GB"
+      ]
+    },
+    {
+      "name": "Maksymalna temperatura eksploatacji",
+      "productCount": 1,
+      "exampleValues": [
+        "95°C"
+      ]
+    },
+    {
+      "name": "Maksymalne taktowanie procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "4.6GHz",
+        "5.4GHz",
+        "5.6GHz",
+        "5.7GHz",
+        "5.1GHz"
+      ]
+    },
+    {
+      "name": "Minimalna temperatura pracy",
+      "productCount": 1,
+      "exampleValues": [
+        "95°C"
+      ]
+    },
+    {
+      "name": "Model dedykowanej karty graficznej",
+      "productCount": 6,
+      "exampleValues": [
+        "Niedostępny"
+      ]
+    },
+    {
+      "name": "Model karty graficznej on-board",
+      "productCount": 6,
+      "exampleValues": [
+        "AMD Radeon Graphics",
+        "AMD Radeon",
+        "Niedostępny"
+      ]
+    },
+    {
+      "name": "Model procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "5700G",
+        "9600X",
+        "5600X",
+        "7900X",
+        "9950X3D"
+      ]
+    },
+    {
+      "name": "Nazwa rodziny procesorów",
+      "productCount": 6,
+      "exampleValues": [
+        "Ryzen 7",
+        "Ryzen 5",
+        "Ryzen 9"
+      ]
+    },
+    {
+      "name": "Nie-ECC",
+      "productCount": 3,
+      "exampleValues": [
+        "Tak"
+      ]
+    },
+    {
+      "name": "Numer modelu",
+      "productCount": 6,
+      "exampleValues": [
+        "5700G",
+        "9600X",
+        "5600X",
+        "R9-7900X",
+        "9950X3D"
+      ]
+    },
+    {
+      "name": "Objętność brutto",
+      "productCount": 6,
+      "exampleValues": [
+        "0.000152cubm",
+        "0.000256cubm",
+        "0.001276cubm",
+        "0.001995cubm",
+        "0.0005469cubm"
+      ]
+    },
+    {
+      "name": "Obsługa kanałów pamięci",
+      "productCount": 5,
+      "exampleValues": [
+        "Dwukanałowy"
+      ]
+    },
+    {
+      "name": "pamięć podręczna L1",
+      "productCount": 1,
+      "exampleValues": [
+        "0.768MB"
+      ]
+    },
+    {
+      "name": "PCI-Express 3.0 16x",
+      "productCount": 4,
+      "exampleValues": []
+    },
+    {
+      "name": "Producent procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "AMD"
+      ]
+    },
+    {
+      "name": "Przeznaczenie",
+      "productCount": 2,
+      "exampleValues": [
+        "PC"
+      ]
+    },
+    {
+      "name": "Rodzaj opakowania",
+      "productCount": 6,
+      "exampleValues": [
+        "Taca",
+        "Pudełko"
+      ]
+    },
+    {
+      "name": "Segment rynku",
+      "productCount": 4,
+      "exampleValues": [
+        "Desktop"
+      ]
+    },
+    {
+      "name": "Summary",
+      "productCount": 6,
+      "exampleValues": [
+        "AMD Ryzen 7 5700G. Typ procesora: AMD Ryzen™ 7, Gniazdo procesora: Socket AM4, Litografia procesora: 7 nm. Obsługa kanałów pamięci: Dwukanałowy, Typy pamięci wspierane przez procesor: DDR4-SDRAM, Taktowanie zegara pamięci wspierane przez procesor: 3200 MHz. Model karty graficznej on-board: AMD Radeon Graphics, Wbudowana bazowa częstotliwość procesora: 2000 MHz. Segment rynku: Desktop",
+        "AMD Ryzen 5 9600X. Typ procesora: AMD Ryzen™ 5, Gniazdo procesora: Gniazdo AM5, Litografia procesora: 4 nm. Obsługa kanałów pamięci: Dwukanałowy, Maksymalna pamięć wewnętrzna wspierana przez procesor: 192 GB, Typy pamięci wspierane przez procesor: DDR5-SDRAM. Model karty graficznej on-board: AMD Radeon, Wbudowana bazowa częstotliwość procesora: 2200 MHz. Instrukcje obsługiwania: AES, AVX, AVX 2.0, AVX-512, SSE, SSE2, SSE3, SSE4.1, SSE4.2, SSSE3. Wersja USB: 2.0/3.2 Gen 2 (3.1 Gen 2)",
+        "AMD Ryzen 5 5600X. Typ procesora: AMD Ryzen™ 5, Gniazdo procesora: Socket AM4, Litografia procesora: 7 nm. Typy pamięci wspierane przez procesor: DDR4-SDRAM, Taktowanie zegara pamięci wspierane przez procesor: 3200 MHz. Segment rynku: Desktop",
+        "AMD Ryzen 9 7900X. Typ procesora: AMD Ryzen™ 9, Gniazdo procesora: Gniazdo AM5, Rodzaj opakowania: Pudełko. Obsługa kanałów pamięci: Dwukanałowy, Maksymalna pamięć wewnętrzna wspierana przez procesor: 128 GB, Typy pamięci wspierane przez procesor: DDR5-SDRAM. Model karty graficznej on-board: AMD Radeon Graphics, Wbudowana bazowa częstotliwość procesora: 400 MHz, Dynamiczne taktowanie wbudowanej karty graficznej (max): 2200 MHz. System operacyjny: Windows 11 - 64-Bit, Windows 10 - 64-Bit, RHEL x86 64-Bit, Ubuntu x86 64-Bit. Wersja USB: 2.0/3.2 Gen 2 (3.1 Gen 2)",
+        "AMD Ryzen 9 9950X3D. Typ procesora: AMD Ryzen™ 9, Gniazdo procesora: Gniazdo AM5, Litografia procesora: 4 nm. Obsługa kanałów pamięci: Dwukanałowy, Maksymalna pamięć wewnętrzna wspierana przez procesor: 192 GB, Typy pamięci wspierane przez procesor: DDR5-SDRAM. Model karty graficznej on-board: AMD Radeon Graphics, Wbudowana bazowa częstotliwość procesora: 2200 MHz. Segment rynku: Desktop, Instrukcje obsługiwania: AES, AVX, AVX 2.0, AVX-512, SSE, SSE2, SSE3, SSE4.1, SSE4.2, SSSE3. Wersja USB: 3.2 Gen 2 (3.1 Gen 2)"
+      ]
+    },
+    {
+      "name": "System operacyjny",
+      "productCount": 2,
+      "exampleValues": [
+        "Windows 11 - 64-Bit, Windows 10 - 64-Bit, RHEL x86 64-Bit, Ubuntu x86 64-Bit",
+        "Windows 11 - 64-Bit Edition"
+      ]
+    },
+    {
+      "name": "Taktowanie zegara pamięci wspierane przez procesor",
+      "productCount": 6,
+      "exampleValues": [
+        "3200MHz",
+        "3600/5600MHz",
+        "3600/5200MHz"
+      ]
+    },
+    {
+      "name": "Technologia Intel® Hyper Threading (Intel® HT Technology)",
+      "productCount": 2,
+      "exampleValues": [
+        "Nie"
+      ]
+    },
+    {
+      "name": "Termiczny układ zasilania (TDP)",
+      "productCount": 6,
+      "exampleValues": [
+        "65W",
+        "170W"
+      ]
+    },
+    {
+      "name": "Tryb pracy procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "32-bit/64-bit",
+        "64-bit"
+      ]
+    },
+    {
+      "name": "Typ pamięci procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "L3",
+        "L2 & L3"
+      ]
+    },
+    {
+      "name": "Typ procesora",
+      "productCount": 6,
+      "exampleValues": [
+        "AMD Ryzen™ 7",
+        "AMD Ryzen™ 5",
+        "AMD Ryzen™ 9"
+      ]
+    },
+    {
+      "name": "Typy pamięci wspierane przez procesor",
+      "productCount": 6,
+      "exampleValues": [
+        "DDR4-SDRAM",
+        "DDR5-SDRAM"
+      ]
+    },
+    {
+      "name": "Unit Box Height",
+      "productCount": 6,
+      "exampleValues": [
+        "0.01",
+        "0.04",
+        "0.07",
+        "0.09",
+        "0.035"
+      ]
+    },
+    {
+      "name": "Unit Box Length",
+      "productCount": 6,
+      "exampleValues": [
+        "0.05",
+        "0.04",
+        "0.135",
+        "0.125",
+        "0.12"
+      ]
+    },
+    {
+      "name": "Unit Box Width",
+      "productCount": 6,
+      "exampleValues": [
+        "0.05",
+        "0.005",
+        "0.135",
+        "0.13",
+        "0.125"
+      ]
+    },
+    {
+      "name": "Vendor Homepage",
+      "productCount": 6,
+      "exampleValues": [
+        "https://www.amd.com/en/products/apu/amd-ryzen-7-5700g",
+        "https://www.amd.com/en/products/processors/desktops/ryzen/9000-series/amd-ryzen-5-9600x.html",
+        "https://www.amd.com/en/products/cpu/amd-ryzen-5-5600x#product-specs",
+        "https://www.amd.com/en/products/cpu/amd-ryzen-9-7900x",
+        "https://www.amd.com/en/products/processors/desktops/ryzen/9000-series/amd-ryzen-9-9950x3d.html"
+      ]
+    },
+    {
+      "name": "Wbudowana bazowa częstotliwość procesora",
+      "productCount": 5,
+      "exampleValues": [
+        "2000MHz",
+        "2200MHz",
+        "400MHz"
+      ]
+    },
+    {
+      "name": "Wersja gniazd typu Slot (PCI Express)",
+      "productCount": 5,
+      "exampleValues": [
+        "3.0",
+        "5.0",
+        "4.0"
+      ]
+    },
+    {
+      "name": "Wersja USB",
+      "productCount": 3,
+      "exampleValues": [
+        "2.0/3.2 Gen 2 (3.1 Gen 2)",
+        "3.2 Gen 2 (3.1 Gen 2)"
+      ]
+    },
+    {
+      "name": "Zawiera system chłodzący",
+      "productCount": 6,
+      "exampleValues": [
+        "Nie",
+        "Tak"
+      ]
+    }
+  ]
+}
