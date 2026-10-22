@@ -96,6 +96,8 @@ function testNamesMatchSynonyms() {
   assert.ok(attrSync.namesMatch('Socket', 'Sockel'));
   assert.ok(attrSync.namesMatch('Liczba rdzeni', 'Rdzenie'));
   assert.ok(attrSync.namesMatch('TDP', 'thermal design power'));
+  assert.ok(attrSync.namesMatch('TDP', 'Max TDP'));
+  assert.ok(attrSync.namesMatch('Socket', 'Kompatybilne sockety'));
   assert.ok(!attrSync.namesMatch('Socket', 'TDP'));
 }
 
@@ -118,8 +120,85 @@ function testManualNotOverwritten() {
   db.close();
 }
 
+function testActionSectionKeysResolveToCanonical() {
+  const db = makeDb();
+  const aliasMap = attrSync.loadAliasMaps(db);
+  assert.strictEqual(attrSync.resolveKey('Chłodzenie / Socket', aliasMap), 'Socket');
+  assert.strictEqual(attrSync.resolveKey('Sockel', aliasMap), 'Socket');
+  assert.strictEqual(attrSync.resolveKey('Specyfikacja / Max TDP', aliasMap), 'TDP');
+  assert.strictEqual(attrSync.resolveKey('Höhe', aliasMap), 'Wysokość');
+  assert.strictEqual(attrSync.resolveKey('CPU / Kompatybilne podstawki', aliasMap), 'Socket');
+  db.close();
+}
+
+function testFlattenNestedParameters() {
+  const flat = attrSync.flattenAttrObject({
+    parameters: [
+      { parameterName: 'Socket', parameterValue: 'AM5' },
+      { name: 'TDP', value: '180 W' },
+    ],
+  });
+  assert.strictEqual(flat.Socket, 'AM5');
+  assert.strictEqual(flat.TDP, '180 W');
+}
+
+function testSeedPrefersCpuCoolerSchema() {
+  const db = makeDb();
+  const map = {
+    aio: ['Procesor', 'RAM', 'Dysk'],
+    chłodzeni: ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość'],
+    'wentylatory do procesor': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość'],
+    wentylator: ['Rozmiar', 'Obroty'],
+  };
+  attrSync.seedCategoryAttrSchema(db, 1, 'Wentylatory Do Procesorów', map);
+  const names = db.prepare('SELECT attr_name FROM category_attributes WHERE category_id = 1').all().map(r => r.attr_name);
+  assert.ok(names.includes('Socket'), 'CPU cooler category must get Socket');
+  assert.ok(names.includes('TDP'));
+  assert.ok(!names.includes('Rozmiar'), 'generic fan schema must not win over CPU cooler schema');
+  assert.ok(!names.includes('Procesor'), 'AIO PC schema must not win over cooling');
+
+  attrSync.seedCategoryAttrSchema(db, 2, 'Chłodzenie AIO', map);
+  const aio = db.prepare('SELECT attr_name FROM category_attributes WHERE category_id = 2').all().map(r => r.attr_name);
+  assert.ok(aio.includes('Socket'));
+  assert.ok(!aio.includes('Procesor'));
+  db.close();
+}
+
+function testHydrateActionKeysIntoCatalog() {
+  const db = makeDb();
+  db.prepare('INSERT INTO product_categories (id, name) VALUES (1, ?)').run('Wentylatory Do Procesorów');
+  db.prepare(`
+    INSERT INTO catalog_master (canonical_ean, all_eans, name, category_id, category_name, raw_attributes)
+    VALUES ('5901234123457', '[]', 'Arctic Freezer', 1, 'Wentylatory Do Procesorów', '{}')
+  `).run();
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, attributes, price_pln, stock_quantity)
+    VALUES (1, '5901234123457', '5901234123457', 'Arctic',
+      '{"Chłodzenie / Socket":"AM5","Specyfikacja / Max TDP":"180 W","artnr":"X9"}', 120, 4)
+  `).run();
+
+  const products = db.prepare('SELECT * FROM catalog_master').all();
+  attrSync.hydrateProductsRaw(db, products, attrSync.loadAliasMaps(db));
+  const raw = JSON.parse(products[0].raw_attributes);
+  assert.strictEqual(raw.Socket, 'AM5');
+  assert.strictEqual(raw.TDP, '180 W');
+  assert.ok(!raw.artnr);
+
+  const list = attrSync.buildAttributeList(raw, {}, [
+    { attr_name: 'Socket', attr_type: 'text' },
+    { attr_name: 'TDP', attr_type: 'numeric' },
+  ], attrSync.loadAliasMaps(db));
+  assert.ok(list.some(a => a.attr_name === 'Socket' && a.value_text === 'AM5'));
+  assert.ok(list.some(a => a.attr_name === 'TDP'));
+  db.close();
+}
+
 testSocketFromGermanFeed();
 testNamesMatchSynonyms();
 testJunkFilter();
 testManualNotOverwritten();
+testActionSectionKeysResolveToCanonical();
+testFlattenNestedParameters();
+testSeedPrefersCpuCoolerSchema();
+testHydrateActionKeysIntoCatalog();
 console.log('catalogAttrSync tests: ok');

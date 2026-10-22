@@ -557,7 +557,7 @@ const ConfigState = {
   steps: [
     { id: 1,  key: 'cpu',         label: '1. Procesor',          type: 'single', categoryIds: [3691], catName: 'Procesory',              catAlias: ['procesor'] },
     { id: 2,  key: 'mb',          label: '2. Płyta główna',       type: 'single', categoryIds: [3695, 3967, 3944, 3956, 3950], catName: null,           catAlias: ['płyty główne', 'mainboards', 'motherboards', 'płyta główna'] },
-    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylator', 'chłodzenie', 'cooler', 'wentylatory do procesor'] },
+    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylatory do procesor', 'chłodzenie procesor', 'chłodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chłodzenie wodne', 'chłodzenie', 'wentylator', 'cooler'] },
     { id: 4,  key: 'ram',         label: '4. Pamięć RAM',         type: 'single', categoryIds: [4211, 4282], catName: null,            catAlias: ['pamiec', 'dimm', 'so-dimm', 'pamięci do komputerów'] },
     { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne'] },
     { id: 6,  key: 'gpu',         label: '6. Karta graficzna',    type: 'single', categoryIds: [3694, 3987], catName: null,        catAlias: ['karta graficzna', 'karty graficzne'] },
@@ -1054,12 +1054,21 @@ async function loadStepContent() {
         ...(Array.isArray(step.catAlias) ? step.catAlias : step.catAlias ? [step.catAlias] : []),
         step.catName,
       ].filter(Boolean).map(norm);
-      const matched = cats.filter(c => {
+      const specificAliases = aliases.filter(a => a && a.length >= 8);
+      const genericAliases = aliases.filter(a => a && a.length < 8);
+      const scoreCat = (c) => {
         const n = norm(c.name);
-        if ((step.categoryIds || []).includes(c.id)) return true;
-        return aliases.some(a => a && (n === a || n.includes(a)));
-      });
+        if ((step.categoryIds || []).includes(c.id)) return 10;
+        if (specificAliases.some(a => n === a || n.includes(a))) return 5 + n.length / 100;
+        if (genericAliases.some(a => n === a || n.includes(a))) return 1;
+        return 0;
+      };
+      const matched = cats.filter(c => scoreCat(c) > 0).sort((a, b) => scoreCat(b) - scoreCat(a));
       categoryIds = matched.map(c => c.id);
+      if (step.key === 'cooler') {
+        const specific = matched.filter(c => scoreCat(c) >= 5);
+        if (specific.length) categoryIds = specific.map(c => c.id);
+      }
       catId = categoryIds[0] || null;
     } catch (e) {
       categoryIds = step.categoryIds || [];
@@ -1160,7 +1169,8 @@ async function loadStepContent() {
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         try {
-          activeFilters = JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          activeFilters = Array.isArray(parsed) && parsed.length ? parsed : defaultFilters;
         } catch (e) {
           activeFilters = defaultFilters;
         }
@@ -1174,9 +1184,10 @@ async function loadStepContent() {
         const vals = new Set();
         ConfigState.stepProducts[catId].forEach(p => {
           const v = getAttrVal(p, attrName);
-          if (v !== null && v !== undefined && v !== '') vals.add(v);
+          if (v !== null && v !== undefined && v !== '') vals.add(String(v));
         });
-        if (vals.size < 2) continue; // nie przydatny jako filtr
+        if (vals.size < 1) continue;
+        if (vals.size < 2 && !mappedAttrNames.has(attrName) && (attrPopularity[attrName] || 0) < 3) continue;
         const def = attrDefMap[attrName] || { attr_type: 'text', attr_unit: null };
         const isNum = def.attr_type === 'numeric';
         const sorted = Array.from(vals).sort((x, y) => isNum ? parseFloat(x) - parseFloat(y) : x.toString().localeCompare(y.toString(), 'pl'));
@@ -1317,7 +1328,10 @@ function renderStepProductsList(products, step, query = '') {
       if (mbRam) filtered = filtered.filter(p => { const t = getAttrVal(p, 'Typ'); return !t || mbRam.includes(t); });
     } else if (step.key === 'cooler' && cpu) {
       const cpuSocket = getAttrVal(cpu, 'Socket');
-      if (cpuSocket) filtered = filtered.filter(p => { const s = getAttrVal(p, 'Kompatybilne sockety'); return !s || norm(s).includes(norm(cpuSocket)); });
+      if (cpuSocket) filtered = filtered.filter(p => {
+        const s = getAttrVal(p, 'Socket') || getAttrVal(p, 'Kompatybilne sockety');
+        return !s || norm(String(s)).includes(norm(String(cpuSocket)));
+      });
     } else if (step.key === 'casePc' && mb) {
       const mbFormat = getAttrVal(mb, 'Format');
       if (mbFormat) filtered = filtered.filter(p => { const f = getAttrVal(p, 'Format płyty'); return !f || norm(f).includes(norm(mbFormat)); });
@@ -1464,14 +1478,34 @@ function renderStepProductsList(products, step, query = '') {
   container.innerHTML = html;
 }
 
+function foldAttrName(s) {
+  return String(s || '').toLowerCase()
+    .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+    .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+    .replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z')
+    .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ä/g,'a');
+}
+
+const ATTR_NAME_GROUPS = [
+  ['socket', 'sockel', 'gniazdo', 'kompatybilne sockety', 'kompatybilne podstawki', 'podstawka'],
+  ['tdp', 'max tdp', 'moc cieplna'],
+  ['wysokosc', 'height', 'hohe'],
+  ['typ chlodzenia', 'cooler type', 'cooling type'],
+  ['typ pamieci ram', 'memory type', 'ram type', 'typ'],
+];
+
+function attrNamesMatch(a, b) {
+  const fa = foldAttrName(a);
+  const fb = foldAttrName(b);
+  if (!fa || !fb) return false;
+  if (fa === fb) return true;
+  if (fa.includes(fb) || fb.includes(fa)) return true;
+  return ATTR_NAME_GROUPS.some(g => g.some(x => fa.includes(x)) && g.some(x => fb.includes(x)));
+}
+
 function getAttrVal(product, attrName) {
   const attrs = product.attributes || [];
-  const target = (attrName || '').toLowerCase();
-  const a = attrs.find(x => (x.attr_name || '').toLowerCase() === target)
-    || attrs.find(x => {
-      const n = (x.attr_name || '').toLowerCase();
-      return n.includes(target) || (target.length >= 4 && target.includes(n));
-    });
+  const a = attrs.find(x => attrNamesMatch(x.attr_name, attrName));
   if (!a) return null;
   return a.value_numeric != null ? a.value_numeric : a.value_text;
 }

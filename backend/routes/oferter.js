@@ -62,12 +62,33 @@ const PC_ATTR_SCHEMA = {
     { name: 'Sloty M.2', type: 'numeric', unit: null },
     { name: 'WiFi', type: 'text', unit: null },
   ],
+  'wentylatory do procesor': [
+    { name: 'Typ chłodzenia', type: 'text', unit: null },
+    { name: 'Socket', type: 'text', unit: null },
+    { name: 'TDP', type: 'numeric', unit: 'W' },
+    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
+    { name: 'RGB', type: 'text', unit: null },
+    { name: 'Głośność', type: 'text', unit: null },
+  ],
   'chlodzenie': [
-    { name: 'Typ chlodzenia', type: 'text', unit: null },
-    { name: 'Max TDP', type: 'numeric', unit: 'W' },
-    { name: 'Kompatybilne sockety', type: 'text', unit: null },
-    { name: 'Wysokosc', type: 'numeric', unit: 'mm' },
-    { name: 'Rozmiar radiatora', type: 'text', unit: 'mm' },
+    { name: 'Typ chłodzenia', type: 'text', unit: null },
+    { name: 'Socket', type: 'text', unit: null },
+    { name: 'TDP', type: 'numeric', unit: 'W' },
+    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
+    { name: 'RGB', type: 'text', unit: null },
+    { name: 'Głośność', type: 'text', unit: null },
+  ],
+  'kuhler': [
+    { name: 'Typ chłodzenia', type: 'text', unit: null },
+    { name: 'Socket', type: 'text', unit: null },
+    { name: 'TDP', type: 'numeric', unit: 'W' },
+    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
+    { name: 'RGB', type: 'text', unit: null },
+  ],
+  'wentylator': [
+    { name: 'Rozmiar', type: 'text', unit: 'mm' },
+    { name: 'Obroty', type: 'numeric', unit: 'RPM' },
+    { name: 'Głośność', type: 'text', unit: 'dB' },
     { name: 'RGB', type: 'text', unit: null },
   ],
   'pamiec ram': [
@@ -134,18 +155,24 @@ router.post('/setup/seed-attributes', (req, res) => {
     const doSeed = db.transaction(() => {
       for (const cat of cats) {
         const catFold = attrSync.fold(cat.name);
-        for (const [keyword, attrs] of Object.entries(PC_ATTR_SCHEMA)) {
-          if (!catFold.includes(attrSync.fold(keyword))) continue;
-          let added = 0;
-          attrs.forEach((a, i) => {
-            try {
-              const r = insertAttr.run(cat.id, a.name, a.type, a.unit, i);
-              if (r.changes) added++;
-            } catch (_) {}
-          });
-          if (added > 0) results.push({ category: cat.name, id: cat.id, added });
-          break;
+        let bestKey = null;
+        let bestLen = 0;
+        for (const keyword of Object.keys(PC_ATTR_SCHEMA)) {
+          const fk = attrSync.fold(keyword);
+          if (fk && catFold.includes(fk) && fk.length > bestLen) {
+            bestKey = keyword;
+            bestLen = fk.length;
+          }
         }
+        if (!bestKey) continue;
+        let added = 0;
+        PC_ATTR_SCHEMA[bestKey].forEach((a, i) => {
+          try {
+            const r = insertAttr.run(cat.id, a.name, a.type, a.unit, i);
+            if (r.changes) added++;
+          } catch (_) {}
+        });
+        if (added > 0) results.push({ category: cat.name, id: cat.id, added, schema: bestKey });
       }
     });
 
@@ -186,7 +213,7 @@ router.get('/setup/status', (req, res) => {
 
     const pcCats = cats.filter(c => {
       const n = normalizeStr(c.name);
-      return ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => n.includes(k));
+      return ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => n.includes(k));
     });
 
     res.json({ ok: true, pc_categories: pcCats, total: pcCats.length });
@@ -209,7 +236,7 @@ router.get('/setup/categories', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
     }));
 
     res.json({ ok: true, categories: result });
@@ -282,6 +309,16 @@ router.get('/components/:catId', (req, res) => {
     const scopeIds = attrSync.expandCategoryIds(db, [catId]);
     const catScope = scopeIds.length ? scopeIds : [catId];
 
+    try {
+      const catalogSvc = require('../services/catalogService');
+      const scopeCats = db.prepare(
+        `SELECT id, name FROM product_categories WHERE id IN (${catScope.map(() => '?').join(',')})`
+      ).all(...catScope);
+      for (const cat of scopeCats) {
+        attrSync.seedCategoryAttrSchema(db, cat.id, cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+      }
+    } catch (_) {}
+
     let where = `cm.category_id IN (${catScope.map(() => '?').join(',')})`;
     const params = [...catScope];
     if (search) { where += ' AND (cm.name LIKE ? OR cm.manufacturer LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
@@ -344,6 +381,9 @@ router.get('/components/:catId', (req, res) => {
       }
     }
 
+    const aliasMap = attrSync.loadAliasMaps(db);
+    try { attrSync.hydrateProductsRaw(db, products, aliasMap); } catch (_) {}
+
     const catAttrDefs = db.prepare(
       `SELECT attr_name, attr_type, attr_unit FROM category_attributes
        WHERE category_id IN (${catScope.map(() => '?').join(',')})
@@ -357,7 +397,6 @@ router.get('/components/:catId', (req, res) => {
       seenDefs.add(k);
       uniqueDefs.push(def);
     }
-    const aliasMap = attrSync.loadAliasMaps(db);
 
     // 3. Batch suppliers (1 query zamiast N queries)
     const suppliersMap = {}; // ean -> [{supplier_name, price_pln, stock_quantity, availability}]
@@ -530,7 +569,7 @@ router.get('/setup/coverage', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
       coverage_pct: c.product_count > 0 ? Math.round((c.products_with_attrs / c.product_count) * 100) : 0,
     }));
 

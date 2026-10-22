@@ -343,8 +343,12 @@ const CATEGORY_ATTR_MAP = {
   'ładowark': ['Moc', 'Złącze', 'Szybkie ładowanie'],
   // Cases / Cooling
   'obudow': ['Format', 'Typ', 'Materiał', 'Wentylatory'],
-  'chłodzeni': ['Typ', 'Socket', 'TDP', 'Głośność'],
-  'wentylator': ['Rozmiar', 'Obroty', 'Głośność', 'Podświetlenie'],
+  'wentylatory do procesor': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB', 'Głośność'],
+  'chłodzenie procesor': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB', 'Głośność'],
+  'cpu cooler': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB'],
+  'chłodzeni': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB', 'Głośność'],
+  'kuhler': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB'],
+  'wentylator': ['Rozmiar', 'Obroty', 'Głośność', 'RGB'],
   'pasta termiczn': ['Typ', 'Przewodność'],
   // Power
   'baterie': ['Typ', 'Napięcie', 'Pojemność', 'Rozmiar'],

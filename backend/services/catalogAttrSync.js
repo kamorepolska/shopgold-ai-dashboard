@@ -28,40 +28,54 @@ const JUNK_KEYS = new Set([
 const JUNK_RE = /cena|marż|marza|brutto|netto|narzut|sprzedaż|kupna|price|rabat|discount|\bid\b|kod\b|code\b|index\b|indeks|sku\b|erp\b|symbol\b|elko|artykuł|artykul|nr\.\s*art|numer art|katalog|magazyn|dostępn|dostepn|\bilosc\b|\bilość\b|gabaryt|opakow|wymiary opak|waga\s+(brutto|netto)|\bkategor|\bgrupa\b|\bpodkategor|\bnadkategor|\bpodgrupa/i;
 
 const SYNONYM_GROUPS = [
-  ['socket', 'sockel', 'gniazdo', 'gniazdo procesora', 'cpu socket', 'processor socket', 'sockel cpu', 'cpu sockel'],
-  ['tdp', 'thermal design power', 'pobor mocy', 'pobór mocy', 'wattage', 'moc cieplna'],
+  ['socket', 'sockel', 'gniazdo', 'gniazdo procesora', 'cpu socket', 'processor socket',
+    'sockel cpu', 'cpu sockel', 'kompatybilne sockety', 'compatible sockets', 'sockel kompatibel',
+    'kompatybilne podstawki', 'podstawka', 'unterstutzte sockel', 'supported sockets', 'socket support'],
+  ['tdp', 'thermal design power', 'pobor mocy', 'pobór mocy', 'moc cieplna', 'max tdp', 'tdp max',
+    'cooler tdp', 'tdp chlodzenia', 'tdp chłodzenia', 'maksymalne tdp', 'cooling capacity'],
   ['rdzenie', 'liczba rdzeni', 'cores', 'core count', 'anzahl kerne', 'kerne', 'cpu cores'],
   ['watki', 'wątki', 'threads', 'thread count', 'anzahl threads'],
   ['chipset', 'chipset plyty', 'motherboard chipset'],
   ['format', 'form factor', 'formfaktor', 'format plyty', 'format płyty', 'atx form'],
-  ['typ pamieci ram', 'typ pamięci ram', 'typ', 'memory type', 'ram type', 'speichertyp', 'typ pamieci', 'ddr'],
+  ['typ pamieci ram', 'typ pamięci ram', 'memory type', 'ram type', 'speichertyp', 'typ pamieci'],
   ['pojemnosc', 'pojemność', 'capacity', 'kapazitat', 'kapazität', 'size gb', 'speichergröße'],
-  ['taktowanie', 'frequency', 'takt', 'clock', 'mhz', 'speed', 'taktfrequenz', 'memory speed'],
+  ['taktowanie', 'frequency', 'takt', 'clock', 'taktfrequenz', 'memory speed'],
   ['vram', 'pamiec', 'pamięć', 'memory size', 'gpu memory', 'speicher'],
-  ['moc', 'power', 'leistung', 'watt', 'psu wattage', 'output power'],
+  ['moc', 'leistung', 'psu wattage', 'output power'],
   ['certyfikat', 'certyfikacja', 'certificate', '80 plus', 'efficiency'],
   ['modularnosc', 'modularność', 'modularnosc', 'modular'],
-  ['dlugosc karty', 'długość karty', 'length', 'lange', 'länge', 'gpu length', 'card length'],
-  ['wysokosc', 'wysokość', 'height', 'hohe', 'höhe', 'cooler height'],
-  ['rgb', 'beleuchtung', 'podswietlenie', 'podświetlenie', 'lighting'],
+  ['dlugosc karty', 'długość karty', 'gpu length', 'card length'],
+  ['wysokosc', 'wysokość', 'height', 'hohe', 'höhe', 'cooler height', 'wysokosc chlodzenia',
+    'wysokość chłodzenia', 'tower height'],
+  ['rgb', 'beleuchtung', 'podswietlenie', 'podświetlenie', 'lighting', 'argb'],
   ['wifi', 'wireless', 'wlan'],
   ['sloty ram', 'ram slots', 'dimm slots', 'liczba slotow ram'],
   ['sloty m.2', 'm.2 slots', 'm2 slots'],
   ['interfejs', 'interface', 'bus', 'pcie'],
   ['chip', 'gpu chip', 'grafikchip'],
-  ['max tdp', 'tdp max', 'cooler tdp'],
-  ['kompatybilne sockety', 'compatible sockets', 'sockel kompatibel'],
-  ['typ chlodzenia', 'typ chłodzenia', 'cooler type', 'cooling type'],
+  ['typ chlodzenia', 'typ chłodzenia', 'cooler type', 'cooling type', 'rodzaj chlodzenia'],
+  ['rozmiar', 'fan size', 'rozmiar wentylatora', 'ventilatorgrosse', 'ventilatorgröße'],
+  ['obroty', 'rpm', 'drehzahl', 'predkosc obrotowa', 'prędkość obrotowa'],
+  ['glosnosc', 'głośność', 'noise', 'lautstarke', 'lautstärke', 'poziom halasu'],
   ['liczba kosci', 'liczba kości', 'modules', 'kit', 'anzahl module'],
   ['typ dysku', 'drive type', 'ssd type'],
 ];
 
+const WEAK_ATTR_TOKENS = new Set([
+  'watt', 'power', 'size', 'type', 'typ', 'speed', 'mhz', 'ram', 'ddr', 'mm', 'gb', 'w',
+]);
+
 const NUMERIC_HINT = /tdp|rdzen|w[aą]tk|pojemn|moc\b|taktowan|mhz|ghz|vram|wysoko|d[lł]ugo|sloty|liczba|obroty|cache|watt|\bgb\b|\bmm\b/i;
 
 const PC_ATTR_ALIASES = [
-  ['sockel', 'Socket'], ['gniazdo', 'Socket'], ['gniazdo procesora', 'Socket'],
+  ['socket', 'Socket'], ['sockel', 'Socket'], ['gniazdo', 'Socket'], ['gniazdo procesora', 'Socket'],
   ['cpu socket', 'Socket'], ['processor socket', 'Socket'], ['sockel cpu', 'Socket'],
-  ['thermal design power', 'TDP'], ['pobór mocy', 'TDP'], ['pobor mocy', 'TDP'],
+  ['cpu sockel', 'Socket'], ['kompatybilne sockety', 'Socket'], ['compatible sockets', 'Socket'],
+  ['sockel kompatibel', 'Socket'], ['kompatybilne podstawki', 'Socket'], ['podstawka', 'Socket'],
+  ['supported sockets', 'Socket'], ['unterstutzte sockel', 'Socket'],
+  ['tdp', 'TDP'], ['thermal design power', 'TDP'], ['pobór mocy', 'TDP'], ['pobor mocy', 'TDP'],
+  ['max tdp', 'TDP'], ['tdp max', 'TDP'], ['cooler tdp', 'TDP'], ['moc cieplna', 'TDP'],
+  ['tdp chlodzenia', 'TDP'], ['maksymalne tdp', 'TDP'], ['cooling capacity', 'TDP'],
   ['cores', 'Rdzenie'], ['core count', 'Rdzenie'], ['anzahl kerne', 'Rdzenie'],
   ['liczba rdzeni', 'Rdzenie'], ['kerne', 'Rdzenie'],
   ['threads', 'Wątki'], ['thread count', 'Wątki'], ['liczba watkow', 'Wątki'],
@@ -71,19 +85,26 @@ const PC_ATTR_ALIASES = [
   ['typ pamięci ram', 'Typ'], ['typ pamieci ram', 'Typ'], ['typ pamięci', 'Typ'],
   ['capacity', 'Pojemność'], ['kapazität', 'Pojemność'], ['pojemnosc', 'Pojemność'],
   ['taktfrequenz', 'Taktowanie'], ['frequency', 'Taktowanie'], ['clock', 'Taktowanie'],
-  ['memory speed', 'Taktowanie'], ['mhz', 'Taktowanie'],
+  ['memory speed', 'Taktowanie'],
   ['gpu memory', 'Pamięć'], ['vram', 'Pamięć'], ['speicher', 'Pamięć'],
-  ['leistung', 'Moc'], ['watt', 'Moc'], ['psu wattage', 'Moc'], ['power', 'Moc'],
+  ['leistung', 'Moc'], ['psu wattage', 'Moc'], ['output power', 'Moc'],
   ['80 plus', 'Certyfikat'], ['certificate', 'Certyfikat'], ['certyfikacja', 'Certyfikat'],
   ['modular', 'Modularność'], ['modularnosc', 'Modularność'],
   ['gpu length', 'Długość karty'], ['card length', 'Długość karty'], ['länge', 'Długość karty'],
   ['cooler height', 'Wysokość'], ['höhe', 'Wysokość'], ['wysokosc', 'Wysokość'],
-  ['beleuchtung', 'RGB'], ['podświetlenie', 'RGB'], ['podswietlenie', 'RGB'],
+  ['wysokosc chlodzenia', 'Wysokość'], ['tower height', 'Wysokość'], ['height', 'Wysokość'],
+  ['beleuchtung', 'RGB'], ['podświetlenie', 'RGB'], ['podswietlenie', 'RGB'], ['argb', 'RGB'],
   ['wlan', 'WiFi'], ['wireless', 'WiFi'],
   ['ram slots', 'Sloty RAM'], ['dimm slots', 'Sloty RAM'],
   ['m.2 slots', 'Sloty M.2'], ['m2 slots', 'Sloty M.2'],
   ['interface', 'Interfejs'], ['pcie', 'Interfejs'],
   ['chipset', 'Chipset'], ['grafikchip', 'Chip'],
+  ['typ chlodzenia', 'Typ chłodzenia'], ['typ chłodzenia', 'Typ chłodzenia'],
+  ['cooler type', 'Typ chłodzenia'], ['cooling type', 'Typ chłodzenia'],
+  ['rodzaj chlodzenia', 'Typ chłodzenia'],
+  ['fan size', 'Rozmiar'], ['rozmiar wentylatora', 'Rozmiar'], ['rozmiar', 'Rozmiar'],
+  ['rpm', 'Obroty'], ['drehzahl', 'Obroty'], ['obroty', 'Obroty'],
+  ['noise', 'Głośność'], ['lautstarke', 'Głośność'], ['lautstärke', 'Głośność'], ['glosnosc', 'Głośność'],
 ];
 
 function fold(s) {
@@ -124,10 +145,49 @@ function parseNumeric(value) {
 
 function cleanAttrValue(v) {
   if (v == null) return '';
+  if (Array.isArray(v)) {
+    return v.map(x => cleanAttrValue(x)).filter(Boolean).join(', ').slice(0, 500);
+  }
   if (typeof v === 'object') return '';
   const s = String(v).replace(/[\r\n]+/g, ' ').trim();
   if (!s || s === '-' || s === '0' || s === 'n/a' || s === 'N/A' || s === 'null') return '';
   return s.slice(0, 500);
+}
+
+const NV_NAME_KEYS = ['name', 'Name', 'NAME', 'parameterName', 'ParameterName', 'key', 'Key', 'label', 'Label', 'title', 'Title', 'nazwaCechy', 'attr_name'];
+const NV_VAL_KEYS = ['value', 'Value', 'VALUE', 'parameterValue', 'ParameterValue', 'val', 'Val', '_text', '_cdata', 'content', 'Content', 'wartoscCechy', 'attr_value'];
+
+function flattenAttrObject(obj, out = {}, depth = 0) {
+  if (obj == null || depth > 6) return out;
+  if (Array.isArray(obj)) {
+    for (const item of obj) flattenAttrObject(item, out, depth + 1);
+    return out;
+  }
+  if (typeof obj !== 'object') return out;
+
+  let name = null;
+  let val = null;
+  for (const k of NV_NAME_KEYS) {
+    if (obj[k] != null && typeof obj[k] !== 'object') { name = String(obj[k]).trim(); break; }
+  }
+  for (const k of NV_VAL_KEYS) {
+    if (obj[k] != null && typeof obj[k] !== 'object') { val = obj[k]; break; }
+  }
+  if (name && val != null) {
+    const cleaned = cleanAttrValue(val);
+    if (cleaned && !out[name]) out[name] = cleaned;
+  }
+
+  for (const [k, v] of Object.entries(obj)) {
+    if (NV_NAME_KEYS.includes(k) || NV_VAL_KEYS.includes(k) || k === '$attrs') continue;
+    if (v && typeof v === 'object') {
+      flattenAttrObject(v, out, depth + 1);
+    } else if (v != null && String(k).length >= 2) {
+      const cleaned = cleanAttrValue(v);
+      if (cleaned && !out[k]) out[k] = cleaned;
+    }
+  }
+  return out;
 }
 
 function loadAliasMaps(db) {
@@ -145,10 +205,68 @@ function loadAliasMaps(db) {
   return aliasToCanon;
 }
 
-function resolveKey(rawKey, aliasMap) {
-  const folded = fold(rawKey);
+function lookupCanonical(folded, aliasMap) {
   if (!folded) return '';
-  return aliasMap.get(folded) || String(rawKey).trim();
+  if (aliasMap && aliasMap.has(folded)) return aliasMap.get(folded);
+  const syn = SYNONYM_INDEX.get(folded);
+  if (syn == null) return '';
+  const group = SYNONYM_GROUPS[syn];
+  if (aliasMap) {
+    for (const name of group) {
+      const mapped = aliasMap.get(fold(name));
+      if (mapped) return mapped;
+    }
+  }
+  return group[0];
+}
+
+function resolveKey(rawKey, aliasMap) {
+  const original = String(rawKey || '').trim();
+  if (!original) return '';
+  const folded = fold(original);
+  if (!folded) return original;
+
+  const exact = lookupCanonical(folded, aliasMap);
+  if (exact) return exact;
+
+  const last = folded.split(/\s*[\/|:]\s+/).map(s => s.trim()).filter(Boolean).pop();
+  if (last && last !== folded) {
+    const fromLast = lookupCanonical(last, aliasMap);
+    if (fromLast) return fromLast;
+  }
+
+  let best = '';
+  let bestLen = 0;
+  const consider = (alias, canon) => {
+    if (!alias || alias.length < 5 || WEAK_ATTR_TOKENS.has(alias)) return;
+    const re = new RegExp('(?:^|[^a-z0-9])' + alias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:$|[^a-z0-9])');
+    if (re.test(folded) && alias.length > bestLen) {
+      best = canon;
+      bestLen = alias.length;
+    }
+  };
+  if (aliasMap) {
+    for (const [alias, canon] of aliasMap) consider(alias, canon);
+  }
+  for (const [alias, gi] of SYNONYM_INDEX) {
+    const group = SYNONYM_GROUPS[gi];
+    let canon = group[0];
+    if (aliasMap) {
+      for (const name of group) {
+        const mapped = aliasMap.get(fold(name));
+        if (mapped) { canon = mapped; break; }
+      }
+    }
+    consider(alias, canon);
+  }
+  if (best) return best;
+
+  const tokens = folded.split(/[^a-z0-9]+/).filter(t => t && !WEAK_ATTR_TOKENS.has(t));
+  for (const t of tokens) {
+    const hit = lookupCanonical(t, aliasMap);
+    if (hit) return hit;
+  }
+  return last && last !== folded ? last : original;
 }
 
 function namesMatch(a, b) {
@@ -228,18 +346,25 @@ function productEanKeys(product) {
   return [...keys];
 }
 
-function indexSupplierAttributes(db) {
+function ingestFlatAttrs(slot, obj, aliasMap) {
+  const flat = flattenAttrObject(obj);
+  for (const [k, v] of Object.entries(flat)) {
+    const val = cleanAttrValue(v);
+    if (!k || !val || isJunkAttrName(k)) continue;
+    const resolved = resolveKey(k, aliasMap);
+    if (!resolved || isJunkAttrName(resolved)) continue;
+    if (!slot[resolved]) slot[resolved] = val;
+  }
+}
+
+function indexSupplierAttributes(db, aliasMap = null) {
+  aliasMap = aliasMap || new Map();
   const byEan = new Map();
   const add = (ean, obj) => {
     const key = normalizeEan(ean);
     if (!key || !obj) return;
     if (!byEan.has(key)) byEan.set(key, {});
-    const slot = byEan.get(key);
-    for (const [k, v] of Object.entries(obj)) {
-      const val = cleanAttrValue(v);
-      if (!k || !val || isJunkAttrName(k)) continue;
-      if (!slot[k]) slot[k] = val;
-    }
+    ingestFlatAttrs(byEan.get(key), obj, aliasMap);
   };
 
   try {
@@ -277,21 +402,16 @@ function mergeRawForProduct(product, supplierIndex, aliasMap) {
   const merged = {};
   try {
     const existing = JSON.parse(product.raw_attributes || '{}');
-    if (existing && typeof existing === 'object') Object.assign(merged, existing);
+    if (existing && typeof existing === 'object') ingestFlatAttrs(merged, existing, aliasMap);
   } catch (_) {}
   for (const key of productEanKeys(product)) {
     const extra = supplierIndex.get(normalizeEan(key) || key);
-    if (extra) Object.assign(merged, extra);
+    if (!extra) continue;
+    for (const [k, v] of Object.entries(extra)) {
+      if (k && v && !merged[k]) merged[k] = v;
+    }
   }
-  const out = {};
-  for (const [k, v] of Object.entries(merged)) {
-    const val = cleanAttrValue(v);
-    if (!k || !val || isJunkAttrName(k)) continue;
-    const resolved = resolveKey(k, aliasMap) || k;
-    if (isJunkAttrName(resolved)) continue;
-    if (!out[resolved]) out[resolved] = val;
-  }
-  return out;
+  return merged;
 }
 
 function mapRawToCategoryAttrs(raw, catAttrs, aliasMap) {
@@ -315,27 +435,33 @@ function mapRawToCategoryAttrs(raw, catAttrs, aliasMap) {
 function seedCategoryAttrSchema(db, categoryId, categoryName, attrMap) {
   if (!attrMap) return 0;
   const nameLower = fold(categoryName);
-  let inserted = 0;
-  for (const [keyword, attrs] of Object.entries(attrMap)) {
-    if (!nameLower.includes(fold(keyword))) continue;
-    attrs.forEach((name, i) => {
-      const type = isNumericAttr(name) ? 'numeric' : 'text';
-      try {
-        const r = db.prepare(`
-          INSERT OR IGNORE INTO category_attributes (category_id, attr_name, attr_type, attr_unit, sort_order, is_filter, visible)
-          VALUES (?, ?, ?, ?, ?, 1, 1)
-        `).run(categoryId, name, type, null, i);
-        if (r.changes) inserted++;
-      } catch (_) {
-        try {
-          const r = db.prepare('INSERT OR IGNORE INTO category_attributes (category_id, attr_name, sort_order) VALUES (?, ?, ?)')
-            .run(categoryId, name, i);
-          if (r.changes) inserted++;
-        } catch (__) {}
-      }
-    });
-    break;
+  let bestKey = null;
+  let bestLen = 0;
+  for (const keyword of Object.keys(attrMap)) {
+    const fk = fold(keyword);
+    if (fk && nameLower.includes(fk) && fk.length > bestLen) {
+      bestKey = keyword;
+      bestLen = fk.length;
+    }
   }
+  if (!bestKey) return 0;
+  let inserted = 0;
+  attrMap[bestKey].forEach((name, i) => {
+    const type = isNumericAttr(name) ? 'numeric' : 'text';
+    try {
+      const r = db.prepare(`
+        INSERT OR IGNORE INTO category_attributes (category_id, attr_name, attr_type, attr_unit, sort_order, is_filter, visible)
+        VALUES (?, ?, ?, ?, ?, 1, 1)
+      `).run(categoryId, name, type, null, i);
+      if (r.changes) inserted++;
+    } catch (_) {
+      try {
+        const r = db.prepare('INSERT OR IGNORE INTO category_attributes (category_id, attr_name, sort_order) VALUES (?, ?, ?)')
+          .run(categoryId, name, i);
+        if (r.changes) inserted++;
+      } catch (__) {}
+    }
+  });
   return inserted;
 }
 
@@ -356,8 +482,7 @@ function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas
         JOIN catalog_master cm ON cm.category_id = pc.id
       `).all();
       for (const cat of cats) {
-        const cnt = db.prepare('SELECT COUNT(*) AS c FROM category_attributes WHERE category_id = ?').get(cat.id).c;
-        if (cnt === 0) seedCategoryAttrSchema(db, cat.id, cat.name, attrMap);
+        seedCategoryAttrSchema(db, cat.id, cat.name, attrMap);
       }
     } catch (_) {}
   }
@@ -390,7 +515,7 @@ function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas
     }
   }
 
-  const supplierIndex = indexSupplierAttributes(db);
+  const supplierIndex = indexSupplierAttributes(db, aliasMap);
   const catAttrCache = new Map();
   const catAttrs = (catId) => {
     if (!catId) return [];
@@ -429,9 +554,88 @@ function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas
   return { products: products.length, filled, raw_updated: rawUpdated };
 }
 
+function hydrateProductsRaw(db, products, aliasMap) {
+  if (!products || !products.length) return products;
+  aliasMap = aliasMap || loadAliasMaps(db);
+  const keySet = new Set();
+  for (const p of products) productEanKeys(p).forEach(k => { if (k) keySet.add(k); });
+  const unique = [...keySet];
+  const byNorm = new Map();
+  const addRow = (ean, obj) => {
+    const key = normalizeEan(ean);
+    if (!key || !obj) return;
+    if (!byNorm.has(key)) byNorm.set(key, {});
+    ingestFlatAttrs(byNorm.get(key), obj, aliasMap);
+  };
+  for (let i = 0; i < unique.length; i += 300) {
+    const chunk = unique.slice(i, i + 300);
+    const ph = chunk.map(() => '?').join(',');
+    try {
+      const rows = db.prepare(`
+        SELECT ean, normalized_ean, attributes FROM supplier_products
+        WHERE attributes IS NOT NULL AND attributes != '' AND attributes != '{}'
+          AND (ean IN (${ph}) OR normalized_ean IN (${ph}))
+      `).all(...chunk, ...chunk);
+      for (const r of rows) {
+        let obj = r.attributes;
+        if (typeof obj === 'string') {
+          try { obj = JSON.parse(obj); } catch { obj = null; }
+        }
+        addRow(r.normalized_ean || r.ean, obj);
+        addRow(r.ean, obj);
+      }
+    } catch (_) {}
+    try {
+      const spa = db.prepare(`
+        SELECT ean, normalized_ean, attr_name, attr_value FROM supplier_product_attrs
+        WHERE attr_value IS NOT NULL AND attr_value != ''
+          AND (ean IN (${ph}) OR normalized_ean IN (${ph}))
+      `).all(...chunk, ...chunk);
+      for (const r of spa) addRow(r.normalized_ean || r.ean, { [r.attr_name]: r.attr_value });
+    } catch (_) {}
+  }
+
+  const persist = db.prepare('UPDATE catalog_master SET raw_attributes = ? WHERE id = ?');
+  const writeBack = db.transaction(() => {
+    for (const p of products) {
+      let existing = {};
+      try { existing = JSON.parse(p.raw_attributes || '{}'); } catch { existing = {}; }
+      const merged = {};
+      if (existing && typeof existing === 'object') ingestFlatAttrs(merged, existing, aliasMap);
+      for (const k of productEanKeys(p)) {
+        const extra = byNorm.get(normalizeEan(k));
+        if (!extra) continue;
+        for (const [ek, ev] of Object.entries(extra)) {
+          if (ek && ev && !merged[ek]) merged[ek] = ev;
+        }
+      }
+      const prev = p.raw_attributes || '{}';
+      const json = JSON.stringify(merged);
+      p.raw_attributes = json;
+      if (p.id && Object.keys(merged).length && json !== prev) {
+        persist.run(json, p.id);
+      }
+    }
+  });
+  try { writeBack(); } catch (_) {
+    for (const p of products) {
+      if (p.raw_attributes && p.id) {
+        try { persist.run(p.raw_attributes, p.id); } catch (__) {}
+      }
+    }
+  }
+  return products;
+}
+
 function buildAttributeList(raw, manualByName, catAttrDefs, aliasMap) {
   aliasMap = aliasMap || new Map();
-  raw = raw && typeof raw === 'object' ? raw : {};
+  if (raw && typeof raw === 'object') {
+    const flat = {};
+    ingestFlatAttrs(flat, raw, aliasMap);
+    raw = flat;
+  } else {
+    raw = {};
+  }
   manualByName = manualByName || {};
   const mapped = [];
   const used = new Set();
@@ -509,6 +713,7 @@ module.exports = {
   namesMatch,
   loadAliasMaps,
   resolveKey,
+  flattenAttrObject,
   ensurePcAttrAliases,
   expandCategoryIds,
   seedCategoryAttrSchema,
@@ -518,5 +723,6 @@ module.exports = {
   mapRawToCategoryAttrs,
   mergeRawForProduct,
   indexSupplierAttributes,
+  hydrateProductsRaw,
   PC_ATTR_ALIASES,
 };
