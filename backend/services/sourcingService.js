@@ -18,7 +18,7 @@ const SftpClient = require('ssh2-sftp-client');
 const AdmZip   = require('adm-zip');
 const {
   normalizeEan, eanVariants, registerNormalizeEan,
-  buildCatalogEanGroups,
+  buildCatalogEanGroups, groupKeyForEan,
 } = require('./eanUtil');
 
 
@@ -3593,7 +3593,8 @@ async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null
   try {
     const catalogService = require('./catalogService');
     const catResult = catalogService.rebuildCatalogForSupplier(db, id);
-    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych, ${catResult.pruned || 0} usuniętych ofert` });
+    const attrNote = catResult.attrs ? `, cech: ${catResult.attrs.filled}` : '';
+    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych, ${catResult.pruned || 0} usuniętych ofert${attrNote}` });
   } catch(catErr) {
     console.error('[catalog_update] ERROR:', catErr.message, catErr.stack);
     addLog({ supplier_id: id, action: 'catalog_update', status: 'error', details: catErr.message });
@@ -3808,6 +3809,13 @@ function buildComparison({
   const allOffers = db.prepare(offerQuery).all(...offerParams);
   const offerMap = indexOffersByNormalizedEan(allOffers);
   const catalogGroups = loadCatalogEanGroups(db);
+  const catalogMeta = {};
+  try {
+    for (const row of db.prepare('SELECT canonical_ean, name, manufacturer FROM catalog_master').all()) {
+      const key = groupKeyForEan(row.canonical_ean, catalogGroups) || normalizeEan(row.canonical_ean);
+      if (key && !catalogMeta[key]) catalogMeta[key] = { name: row.name || '', manufacturer: row.manufacturer || '' };
+    }
+  } catch (_) {}
 
   // Get all unique manufacturers from supplier products for filter dropdown
   const allManufacturersRaw = db.prepare(
@@ -3833,6 +3841,11 @@ function buildComparison({
     if (offers.length > 0) {
       if (!name) name = offers.map(o => o.sp_name || '').reduce((a, b) => a.length > b.length ? a : b, '');
       rowMfg = offers.map(o => normalizeManufacturer(o.sp_manufacturer || '')).find(m => m.length > 0) || '';
+    }
+    const catMeta = catalogMeta[groupKeyForEan(sub.ean, catalogGroups)];
+    if (catMeta) {
+      if (!name) name = catMeta.name;
+      if (!rowMfg) rowMfg = catMeta.manufacturer;
     }
     rowMfg = normalizeManufacturer(rowMfg);
     if (manufacturer && !rowMfg.toLowerCase().includes(manufacturer.toLowerCase())) continue;
@@ -3861,7 +3874,7 @@ function buildComparison({
     }
 
     rows.push({
-      ean: sub.ean, name: sub.name, stock: sub.stock,
+      ean: sub.ean, name: name || sub.name, stock: sub.stock,
       sold_12m: sub.sold_12m, sold_30d: sub.sold_30d,
       buy_price: sub.buy_price, sell_price: sub.sell_price,
       buy_price_date: sub.buy_price_date || null,

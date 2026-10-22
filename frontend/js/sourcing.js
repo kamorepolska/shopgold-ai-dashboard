@@ -5754,6 +5754,7 @@ ${offersHtml}`;
   <div style="display:flex;align-items:center;gap:6px;border-left:1px solid var(--border);padding-left:12px;margin-left:auto">
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:var(--accent)" onclick="SourcingView._showDuplicates()" title="Menedżer Duplikatów">🔍 Skan</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#10b981" onclick="SourcingView._batchGenAttrs()" title="Generuj filtry AI">🤖 Filtry</button>
+    <button class="btn btn--ghost btn--sm" style="font-size:.76rem" onclick="SourcingView._syncCatalogAttrs()" title="Uzupełnij cechy produktów z hurtowni do katalogu Master">🧩 Cechy z hurtowni</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#f59e0b" onclick="SourcingView._batchNormalize()" title="Normalizuj nazwy AI">📝 Nazwy</button>
     ${window.catCategoryId ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#8b5cf6" onclick="SourcingView._showNamingSchemaModal(${window.catCategoryId})" title="Schemat nazwy">📐 Schemat</button>` : ''}
   </div>
@@ -7927,6 +7928,15 @@ ${subiektSectionC}
     } catch(e) { Toast.error('Błąd: ' + e.message); }
   }
 
+  async function _syncCatalogAttrs() {
+    try {
+      Toast.info('Scalam cechy z hurtowni do katalogu Master...');
+      const result = await API.post('/sourcing/catalog/sync-attributes', {});
+      Toast.success(`Uzupełniono ${result.filled || 0} cech (${result.raw_updated || 0} produktów z raw_attributes).`);
+      renderCatalog();
+    } catch (e) { Toast.error('Błąd: ' + e.message); }
+  }
+
   async function _showDuplicates(page = 1) {
     try {
       const data = await API.get(`/sourcing/catalog/duplicates?page=${page}&limit=10`);
@@ -9630,6 +9640,7 @@ ${subiektSectionC}
     _catPageTo,
     _generateAttrs,
     _batchGenAttrs,
+    _syncCatalogAttrs,
     _showDuplicates,
     _scanDuplicates,
     _resolveDuplicate,

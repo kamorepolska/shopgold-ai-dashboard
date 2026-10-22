@@ -2018,6 +2018,13 @@ router.post('/catalog/categories/:id/generate-attributes', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+router.post('/catalog/sync-attributes', (req, res) => {
+  try {
+    const result = catalogSvc.syncCatalogAttributes(svc.getDb(), { seedSchemas: true });
+    res.json({ ok: true, ...result });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/sourcing/catalog/duplicates
 router.get('/catalog/duplicates', (req, res) => {
   try {

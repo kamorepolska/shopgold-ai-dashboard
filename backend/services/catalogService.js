@@ -6,6 +6,7 @@
 'use strict';
 
 const { normalizeEan, eanMatch, eanVariants, registerNormalizeEan } = require('./eanUtil');
+const attrSync = require('./catalogAttrSync');
 
 // ─── Product Name Cleaning ─────────────────────────────────────────────────────
 
@@ -640,7 +641,7 @@ function resolveCategory(db, rawName) {
   try { db.prepare('INSERT OR IGNORE INTO category_aliases (raw_name, category_id) VALUES (?, ?)').run(aliasKey, catId); } catch(_) {}
   
   // 6) Automatycznie wygeneruj domyślne atrybuty (filtry) dla nowej kategorii
-  autoGenerateAttributes(db, catId, titleCase);
+  seedCategoryAttrSchema(db, catId, titleCase);
   
   return catId;
 }
@@ -648,19 +649,8 @@ function resolveCategory(db, rawName) {
 /**
  * Automatycznie generuje filtry (atrybuty) dla kategorii na podstawie CATEGORY_ATTR_MAP.
  */
-
-function autoGenerateAttributes(db, categoryId, categoryName) {
-  const nameLower = categoryName.toLowerCase();
-  for (const [keyword, attrs] of Object.entries(CATEGORY_ATTR_MAP)) {
-    if (nameLower.includes(keyword)) {
-      const insert = db.prepare('INSERT OR IGNORE INTO category_attributes (category_id, attr_name, sort_order) VALUES (?, ?, ?)');
-      for (let i = 0; i < attrs.length; i++) {
-        try { insert.run(categoryId, attrs[i], i); } catch(_) {}
-      }
-      return true;
-    }
-  }
-  return false;
+function seedCategoryAttrSchema(db, categoryId, categoryName) {
+  return attrSync.seedCategoryAttrSchema(db, categoryId, categoryName, CATEGORY_ATTR_MAP) > 0;
 }
 
 // ─── Catalog Rebuild ────────────────────────────────────────────────────────────
@@ -1017,7 +1007,17 @@ function rebuildCatalogForSupplier(db, supplierId) {
   transaction();
 
   const pruned = pruneStaleSupplierOffers(db, supplierId, currentCanonicalSet);
-  return { created, updated, pruned, total: created + updated };
+  let attrs = { products: 0, filled: 0, raw_updated: 0 };
+  try {
+    attrs = attrSync.syncCatalogAttributes(db, {
+      eans: [...currentCanonicalSet],
+      seedSchemas: true,
+      attrMap: CATEGORY_ATTR_MAP,
+    });
+  } catch (e) {
+    console.warn('[catalog] sync attributes:', e.message);
+  }
+  return { created, updated, pruned, attrs, total: created + updated };
 }
 
 /**
@@ -2024,7 +2024,7 @@ async function aiGenerateAttributes(categoryName, samplePrompt = '') {
  * Analizuje raw_attributes produktów z danej kategorii i wyciąga najczęstsze parametry.
  * Służy do automatycznego budowania filtrów na podstawie plików z hurtowni.
  */
-function autoGenerateAttributes(db, categoryId, categoryName) {
+function autoGenerateAttributesFromRaw(db, categoryId, categoryName) {
   const products = db.prepare("SELECT raw_attributes FROM catalog_master WHERE category_id = ? AND raw_attributes != '{}'").all(categoryId);
   if (!products.length) return false;
 
@@ -2071,36 +2071,14 @@ function autoGenerateAttributes(db, categoryId, categoryName) {
  * Generuje filtry dla kategorii — keyword map + AI fallback.
  */
 function populateProductAttributesFromRaw(db, categoryId) {
-  const catAttrs = db.prepare('SELECT id, attr_name FROM category_attributes WHERE category_id = ?').all(categoryId);
-  if (!catAttrs.length) return 0;
-  
-  const products = db.prepare("SELECT id, raw_attributes FROM catalog_master WHERE category_id = ? AND raw_attributes != '{}'").all(categoryId);
-  const ins = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text) VALUES (?, ?, ?)');
-  
-  let inserted = 0;
-  db.transaction(() => {
-    for (const p of products) {
-      try {
-        const raw = JSON.parse(p.raw_attributes);
-        for (const [rawKey, rawVal] of Object.entries(raw)) {
-          if (!rawVal || rawVal === '-') continue;
-          
-          // Match rawKey to a category_attribute
-          const lowerRaw = rawKey.toLowerCase().trim();
-          for (const catAttr of catAttrs) {
-            const lowerCat = catAttr.attr_name.toLowerCase().trim();
-            // Match if exact or if one contains another
-            if (lowerRaw === lowerCat || lowerRaw.includes(lowerCat) || lowerCat.includes(lowerRaw)) {
-              ins.run(p.id, catAttr.id, String(rawVal).trim().substring(0, 255));
-              inserted++;
-              break;
-            }
-          }
-        }
-      } catch(e) {}
-    }
-  })();
-  return inserted;
+  const ids = db.prepare('SELECT id FROM catalog_master WHERE category_id = ?').all(categoryId).map(r => r.id);
+  if (!ids.length) return 0;
+  const result = attrSync.syncCatalogAttributes(db, {
+    catalogIds: ids,
+    seedSchemas: false,
+    attrMap: CATEGORY_ATTR_MAP,
+  });
+  return result.filled;
 }
 
 async function generateAttributesForCategory(db, categoryId, useAi = true) {
@@ -2112,7 +2090,7 @@ async function generateAttributesForCategory(db, categoryId, useAi = true) {
   let source = 'existing';
 
   if (existing.cnt === 0) {
-    const matched = autoGenerateAttributes(db, categoryId, cat.name);
+    const matched = seedCategoryAttrSchema(db, categoryId, cat.name) || autoGenerateAttributesFromRaw(db, categoryId, cat.name);
     if (matched) {
       const cnt = db.prepare('SELECT COUNT(*) as cnt FROM category_attributes WHERE category_id = ?').get(categoryId);
       generated = cnt.cnt;
@@ -2159,7 +2137,7 @@ async function batchGenerateAttributes(db, useAi = false) {
   const cats = db.prepare('SELECT pc.id, pc.name FROM product_categories pc WHERE NOT EXISTS (SELECT 1 FROM category_attributes ca WHERE ca.category_id = pc.id)').all();
   let keywordGen = 0, aiGen = 0, failed = 0;
   for (const cat of cats) {
-    const matched = autoGenerateAttributes(db, cat.id, cat.name);
+    const matched = seedCategoryAttrSchema(db, cat.id, cat.name) || autoGenerateAttributesFromRaw(db, cat.id, cat.name);
     if (matched) { 
       populateProductAttributesFromRaw(db, cat.id);
       keywordGen++; 
@@ -3439,9 +3417,12 @@ Odpowiedz TYLKO JSON array [{\"name\": \"...\", \"category_id\": X}, ...]`;
 }
 
 module.exports = {
+  CATEGORY_ATTR_MAP,
   normalizeEan,
   eanMatch,
   eanVariants,
+  seedCategoryAttrSchema,
+  syncCatalogAttributes: (db, opts = {}) => attrSync.syncCatalogAttributes(db, { attrMap: CATEGORY_ATTR_MAP, ...opts }),
   parseDimensions,
   rebuildCatalogForSupplier,
   rebuildEntireCatalog,

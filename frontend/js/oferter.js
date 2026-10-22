@@ -83,6 +83,7 @@ async function loadAttrsTab() {
         <p>Jednorazowo dodaj definicje atrybutow (Socket, TDP, Format plyty itp.) do kategorii PC. Bez tego filtry zgodnosci nie beda dzialac.</p>
       </div>
       <button class="btn btn--primary" id="ofer-seed-btn">Uruchom seed atrybutow</button>
+      <button class="btn btn--secondary" id="ofer-sync-attrs-btn">Uzupełnij cechy z hurtowni</button>
       <div id="ofer-seed-status" style="font-size:.82rem;"></div>
     </div>
 
@@ -118,6 +119,7 @@ async function loadAttrsTab() {
   `;
 
   document.getElementById('ofer-seed-btn')?.addEventListener('click', runSeed);
+  document.getElementById('ofer-sync-attrs-btn')?.addEventListener('click', runAttrSync);
   document.getElementById('ofer-filter-pc')?.addEventListener('click', () => { OferterState.filterPcOnly = true; loadAttrsTab(); });
   document.getElementById('ofer-filter-all')?.addEventListener('click', () => { OferterState.filterPcOnly = false; loadAttrsTab(); });
 
@@ -473,7 +475,8 @@ async function runSeed() {
   try {
     const d = await API.post('/oferter/setup/seed-attributes', {});
     if (d.ok) {
-      status.innerHTML = `<span style="color:#10b981">✅ Dodano ${d.totalAdded} atrybutow w ${d.seeded.length} kategoriach</span>`;
+      const extra = d.sync ? ` • cech z hurtowni: ${d.sync.filled}` : '';
+      status.innerHTML = `<span style="color:#10b981">✅ Dodano ${d.totalAdded} atrybutów w ${d.seeded.length} kategoriach${extra}</span>`;
       setTimeout(() => loadAttrsTab(), 500);
     } else {
       status.innerHTML = `<span style="color:#f87171">❌ ${d.error}</span>`;
@@ -483,6 +486,27 @@ async function runSeed() {
   }
   btn.disabled = false;
   btn.textContent = 'Uruchom seed atrybutow';
+}
+
+async function runAttrSync() {
+  const btn = document.getElementById('ofer-sync-attrs-btn');
+  const status = document.getElementById('ofer-seed-status');
+  if (!btn || !status) return;
+  btn.disabled = true;
+  btn.textContent = '⏳ Scalam cechy...';
+  try {
+    const d = await API.post('/oferter/setup/sync-attributes', {});
+    if (d.ok) {
+      status.innerHTML = `<span style="color:#10b981">✅ ${d.message || 'Cechy uzupełnione z hurtowni do katalogu Master'}</span>`;
+      setTimeout(() => loadAttrsTab(), 500);
+    } else {
+      status.innerHTML = `<span style="color:#f87171">❌ ${d.error}</span>`;
+    }
+  } catch (e) {
+    status.innerHTML = `<span style="color:#f87171">❌ ${e.message}</span>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Uzupełnij cechy z hurtowni';
 }
 
 // ─── INIT ─────────────────────────────────────────────────────────────────────
@@ -1016,37 +1040,30 @@ async function loadStepContent() {
   } else if (step.type === 'accessories') {
     loadAccessoriesForStep();
   } else {
-    // 1. Resolve category ID based on categoryIds or catName or catAlias
+    // 1. Resolve category IDs from catalog Master (name/alias), hardcoded ShopGold IDs only as extra hits
     let catId = null;
-    let categoryIds = step.categoryIds || [];
-    if (categoryIds.length > 0) {
-      catId = categoryIds[0];
-    } else {
-      try {
-        const catsData = await API.get('/oferter/setup/categories');
-        const cats = catsData.categories || [];
-        
-        // Try exact match by catName first
-        let match = null;
-        if (step.catName) {
-          match = cats.find(c => c.name.toLowerCase() === step.catName.toLowerCase());
-        }
-        
-        // Fallback to catAlias if no exact match found
-        if (!match) {
-          match = cats.find(c => {
-            const catName = c.name.toLowerCase();
-            return Array.isArray(step.catAlias) 
-              ? step.catAlias.some(alias => catName.includes(alias.toLowerCase()))
-              : catName.includes((step.catAlias || '').toLowerCase());
-          });
-        }
-        
-        if (match) {
-          catId = match.id;
-          categoryIds = [catId];
-        }
-      } catch(e){}
+    let categoryIds = [];
+    try {
+      const catsData = await API.get('/oferter/setup/categories');
+      const cats = catsData.categories || [];
+      const norm = s => (s || '').toLowerCase()
+        .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+        .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+        .replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z');
+      const aliases = [
+        ...(Array.isArray(step.catAlias) ? step.catAlias : step.catAlias ? [step.catAlias] : []),
+        step.catName,
+      ].filter(Boolean).map(norm);
+      const matched = cats.filter(c => {
+        const n = norm(c.name);
+        if ((step.categoryIds || []).includes(c.id)) return true;
+        return aliases.some(a => a && (n === a || n.includes(a)));
+      });
+      categoryIds = matched.map(c => c.id);
+      catId = categoryIds[0] || null;
+    } catch (e) {
+      categoryIds = step.categoryIds || [];
+      catId = categoryIds[0] || null;
     }
 
     if (!catId) {
@@ -1448,8 +1465,15 @@ function renderStepProductsList(products, step, query = '') {
 }
 
 function getAttrVal(product, attrName) {
-  const a = (product.attributes || []).find(x => x.attr_name === attrName);
-  return a ? (a.value_numeric !== null ? a.value_numeric : a.value_text) : null;
+  const attrs = product.attributes || [];
+  const target = (attrName || '').toLowerCase();
+  const a = attrs.find(x => (x.attr_name || '').toLowerCase() === target)
+    || attrs.find(x => {
+      const n = (x.attr_name || '').toLowerCase();
+      return n.includes(target) || (target.length >= 4 && target.includes(n));
+    });
+  if (!a) return null;
+  return a.value_numeric != null ? a.value_numeric : a.value_text;
 }
 
 function selectComponent(stepKey, productId, catId) {
@@ -1668,14 +1692,12 @@ async function loadAccessoriesForStep(activeTabKey) {
   try {
     const catsData = await API.get('/oferter/setup/categories');
     const cats = catsData.categories || [];
-    if (tab.categoryIds && tab.categoryIds.length > 0) {
-      matchedCats = cats.filter(cat => tab.categoryIds.includes(cat.id));
-    } else {
-      matchedCats = cats.filter(cat => {
-        const n = normPL(cat.name);
-        return normAliases.some(a => n.includes(a));
-      });
-    }
+    matchedCats = cats.filter(cat => {
+      const n = normPL(cat.name);
+      const byId = (tab.categoryIds || []).includes(cat.id);
+      const byAlias = normAliases.some(a => a && n.includes(a));
+      return byId || byAlias;
+    });
     console.log(`[ACC] Tab "${tab.key}" matched ${matchedCats.length} categories:`, matchedCats.map(c=>c.name));
 
     // Fetch products from ALL matched categories, deduplicate by product id
