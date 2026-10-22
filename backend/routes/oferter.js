@@ -1,10 +1,44 @@
 const express = require('express');
 const router = express.Router();
 const { complete } = require('../services/aiService');
+const { eanVariants, normalizeEan } = require('../services/eanUtil');
 
 function getDb() {
   const svc = require('../services/sourcingService');
   return svc.getDb();
+}
+
+function offerMatchSql(alias, catalogEanExpr = 'cm.canonical_ean') {
+  return `(COALESCE(NULLIF(${alias}.normalized_ean, ''), normalize_ean(${alias}.ean)) = normalize_ean(${catalogEanExpr}))`;
+}
+
+function subiektJoinSql(alias = 'sp') {
+  return `LEFT JOIN subiekt_products ${alias} ON ${alias}.id = (
+    SELECT sp2.id FROM subiekt_products sp2
+    WHERE COALESCE(NULLIF(sp2.normalized_ean, ''), normalize_ean(sp2.ean)) = normalize_ean(cm.canonical_ean)
+    ORDER BY (sp2.stock IS NULL), sp2.stock DESC
+    LIMIT 1
+  )`;
+}
+
+function expandEans(eans) {
+  const set = new Set();
+  for (const e of eans || []) {
+    if (!e) continue;
+    eanVariants(e).forEach(v => set.add(v));
+    const n = normalizeEan(e);
+    if (n) set.add(n);
+  }
+  return [...set];
+}
+
+function firstMapHit(map, ean) {
+  if (!map) return undefined;
+  if (ean && map[ean]) return map[ean];
+  for (const k of expandEans([ean])) {
+    if (map[k]) return map[k];
+  }
+  return undefined;
 }
 
 // ─── PC COMPONENT ATTRIBUTE DEFINITIONS ───────────────────────────────────────
@@ -238,8 +272,8 @@ router.get('/components/:catId', (req, res) => {
     where += ` AND (
       sp.stock > 0 
       OR sp.buy_price > 0 
-      OR (SELECT SUM(stock_quantity) FROM supplier_products sup WHERE sup.ean = cm.canonical_ean) > 0 
-      OR (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE sup2.ean = cm.canonical_ean AND sup2.price_pln > 0) > 0
+      OR (SELECT SUM(stock_quantity) FROM supplier_products sup WHERE ${offerMatchSql('sup')}) > 0 
+      OR (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE ${offerMatchSql('sup2')} AND sup2.price_pln > 0) > 0
     )`;
 
     const products = db.prepare(`
@@ -250,20 +284,20 @@ router.get('/components/:catId', (req, res) => {
         sp.buy_price AS subiekt_buy_price,
         sp.sell_price AS subiekt_sell_price,
         COALESCE(
-          (SELECT MIN(price_pln) FROM supplier_products sup WHERE sup.ean = cm.canonical_ean AND sup.price_pln > 0 AND sup.stock_quantity > 0),
-          (SELECT MIN(price_pln) FROM supplier_products sup6 WHERE sup6.ean = cm.canonical_ean AND sup6.price_pln > 0)
+          (SELECT MIN(price_pln) FROM supplier_products sup WHERE ${offerMatchSql('sup')} AND sup.price_pln > 0 AND sup.stock_quantity > 0),
+          (SELECT MIN(price_pln) FROM supplier_products sup6 WHERE ${offerMatchSql('sup6')} AND sup6.price_pln > 0)
         ) AS best_supplier_price,
         COALESCE(
           sp.buy_price, 
-          (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE sup2.ean = cm.canonical_ean AND sup2.price_pln > 0 AND sup2.stock_quantity > 0),
-          (SELECT MIN(price_pln) FROM supplier_products sup5 WHERE sup5.ean = cm.canonical_ean AND sup5.price_pln > 0)
+          (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE ${offerMatchSql('sup2')} AND sup2.price_pln > 0 AND sup2.stock_quantity > 0),
+          (SELECT MIN(price_pln) FROM supplier_products sup5 WHERE ${offerMatchSql('sup5')} AND sup5.price_pln > 0)
         ) AS effective_buy_price,
-        (SELECT SUM(stock_quantity) FROM supplier_products sup3 WHERE sup3.ean = cm.canonical_ean) AS supplier_stock
+        (SELECT SUM(stock_quantity) FROM supplier_products sup3 WHERE ${offerMatchSql('sup3')}) AS supplier_stock
       FROM catalog_master cm
-      LEFT JOIN subiekt_products sp ON sp.ean = cm.canonical_ean
+      ${subiektJoinSql('sp')}
       WHERE ${where}
       ORDER BY 
-        CASE WHEN (sp.stock > 0 OR (SELECT SUM(stock_quantity) FROM supplier_products sup4 WHERE sup4.ean = cm.canonical_ean) > 0) THEN 1 ELSE 2 END ASC,
+        CASE WHEN (sp.stock > 0 OR (SELECT SUM(stock_quantity) FROM supplier_products sup4 WHERE ${offerMatchSql('sup4')}) > 0) THEN 1 ELSE 2 END ASC,
         cm.name ASC
       LIMIT ? OFFSET ?
     `).all(...params, parseInt(limit), parseInt(offset));
@@ -271,7 +305,7 @@ router.get('/components/:catId', (req, res) => {
     const total = db.prepare(`
       SELECT COUNT(*) as cnt 
       FROM catalog_master cm 
-      LEFT JOIN subiekt_products sp ON sp.ean = cm.canonical_ean
+      ${subiektJoinSql('sp')}
       WHERE ${where}
     `).get(...params).cnt;
 
@@ -337,11 +371,23 @@ router.get('/components/:catId', (req, res) => {
     const rawAttrsMap = {};       // ean -> {attr_name -> first_value} (cechy nie zmapowane do category_attributes)
 
     if (eans.length > 0) {
-      const spaRows = db.prepare(`
-        SELECT spa.ean, spa.attr_name, spa.attr_value
+      const expanded = expandEans(eans);
+      const norms = eans.map(normalizeEan).filter(Boolean);
+      const spaWhere = [];
+      const spaParams = [];
+      if (expanded.length) {
+        spaWhere.push(`spa.ean IN (${expanded.map(() => '?').join(',')})`);
+        spaParams.push(...expanded);
+      }
+      if (norms.length) {
+        spaWhere.push(`spa.normalized_ean IN (${norms.map(() => '?').join(',')})`);
+        spaParams.push(...norms);
+      }
+      const spaRows = spaWhere.length ? db.prepare(`
+        SELECT spa.ean, spa.normalized_ean, spa.attr_name, spa.attr_value
         FROM supplier_product_attrs spa
-        WHERE spa.ean IN (${eans.map(() => '?').join(',')})
-      `).all(...eans);
+        WHERE ${spaWhere.join(' OR ')}
+      `).all(...spaParams) : [];
 
       for (const row of spaRows) {
         const lowerName = row.attr_name.toLowerCase();
@@ -351,9 +397,12 @@ router.get('/components/:catId', (req, res) => {
         if (canonicalLower) {
           const catDef = catAttrByLower[canonicalLower];
           if (catDef) {
-            if (!supplierAttrsMap[row.ean]) supplierAttrsMap[row.ean] = {};
-            if (!supplierAttrsMap[row.ean][catDef.attr_name]) {
-              supplierAttrsMap[row.ean][catDef.attr_name] = { ...catDef, attr_value: row.attr_value };
+            const attrKeys = expandEans([row.ean, row.normalized_ean]);
+            for (const k of attrKeys) {
+              if (!supplierAttrsMap[k]) supplierAttrsMap[k] = {};
+              if (!supplierAttrsMap[k][catDef.attr_name]) {
+                supplierAttrsMap[k][catDef.attr_name] = { ...catDef, attr_value: row.attr_value };
+              }
             }
           }
         }
@@ -378,9 +427,12 @@ router.get('/components/:catId', (req, res) => {
           || lowerName.trim().length < 2;
 
         if (!isJunk && row.attr_value && row.attr_value.trim()) {
-          if (!rawAttrsMap[row.ean]) rawAttrsMap[row.ean] = {};
-          if (!rawAttrsMap[row.ean][row.attr_name]) {
-            rawAttrsMap[row.ean][row.attr_name] = row.attr_value.trim();
+          const rawKeys = expandEans([row.ean, row.normalized_ean]);
+          for (const k of rawKeys) {
+            if (!rawAttrsMap[k]) rawAttrsMap[k] = {};
+            if (!rawAttrsMap[k][row.attr_name]) {
+              rawAttrsMap[k][row.attr_name] = row.attr_value.trim();
+            }
           }
         }
       }
@@ -389,22 +441,38 @@ router.get('/components/:catId', (req, res) => {
     // 3. Batch suppliers (1 query zamiast N queries)
     const suppliersMap = {}; // ean -> [{supplier_name, price_pln, stock_quantity, availability}]
     if (eans.length > 0) {
+      const expanded = expandEans(eans);
+      const norms = eans.map(normalizeEan).filter(Boolean);
+      const offerWhere = [`sup.price_pln > 0`];
+      const offerParams = [];
+      if (expanded.length) {
+        offerWhere.push(`sup.ean IN (${expanded.map(() => '?').join(',')})`);
+        offerParams.push(...expanded);
+      }
+      if (norms.length) {
+        offerWhere.push(`sup.normalized_ean IN (${norms.map(() => '?').join(',')})`);
+        offerParams.push(...norms);
+      }
       const suppRows = db.prepare(`
-        SELECT s.name AS supplier_name, sup.price_pln, sup.stock_quantity, sup.availability, sup.ean
+        SELECT s.name AS supplier_name, sup.price_pln, sup.stock_quantity, sup.availability, sup.ean, sup.normalized_ean
         FROM supplier_products sup
         JOIN suppliers s ON s.id = sup.supplier_id
-        WHERE sup.ean IN (${eans.map(() => '?').join(',')}) AND sup.price_pln > 0
+        WHERE (${offerWhere.slice(1).join(' OR ')}) AND sup.price_pln > 0
         ORDER BY sup.price_pln ASC
-      `).all(...eans);
+      `).all(...offerParams);
       for (const row of suppRows) {
-        if (!suppliersMap[row.ean]) suppliersMap[row.ean] = [];
-        suppliersMap[row.ean].push(row);
+        for (const k of expandEans([row.ean, row.normalized_ean])) {
+          if (!suppliersMap[k]) suppliersMap[k] = [];
+          if (!suppliersMap[k].some(x => x.supplier_name === row.supplier_name && x.ean === row.ean)) {
+            suppliersMap[k].push(row);
+          }
+        }
       }
     }
 
     const enriched = products
       .map(p => {
-        const suppliers = suppliersMap[p.canonical_ean] || [];
+        const suppliers = firstMapHit(suppliersMap, p.canonical_ean) || [];
 
         // Pomiń produkty bez żadnego dostawcy z ceną > 0
         if (suppliers.length === 0) return null;
@@ -416,8 +484,8 @@ router.get('/components/:catId', (req, res) => {
         const supplier_stock = suppliers.reduce((s, r) => s + (r.stock_quantity || 0), 0);
 
         const manualForProd = manualAttrsMap[p.id] || {};
-        const supplierForEan = supplierAttrsMap[p.canonical_ean] || {};
-        const rawForEan = rawAttrsMap[p.canonical_ean] || {};
+        const supplierForEan = firstMapHit(supplierAttrsMap, p.canonical_ean) || {};
+        const rawForEan = firstMapHit(rawAttrsMap, p.canonical_ean) || {};
 
         // Scal mapped attrs: manual > hurtownia (przez category_attributes)
         const mappedAttributes = catAttrDefs
@@ -482,14 +550,21 @@ router.get('/product-attrs/:id', (req, res) => {
                SELECT spa.attr_value
                FROM supplier_product_attrs spa
                JOIN attr_aliases aa ON LOWER(aa.alias) = LOWER(spa.attr_name)
-               WHERE spa.ean = ? AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
+               WHERE (spa.ean IN (${eanVariants(product.canonical_ean).map(() => '?').join(',') || '?'})
+                      OR spa.normalized_ean = ?)
+                 AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
                LIMIT 1
              ) AS supplier_value
       FROM category_attributes ca
       LEFT JOIN product_attributes pa ON pa.attribute_id = ca.id AND pa.catalog_id = ?
       WHERE ca.category_id = ?
       ORDER BY ca.sort_order, ca.attr_name
-    `).all(product.canonical_ean, id, product.category_id);
+    `).all(
+      ...(eanVariants(product.canonical_ean).length ? eanVariants(product.canonical_ean) : [product.canonical_ean]),
+      normalizeEan(product.canonical_ean),
+      id,
+      product.category_id
+    );
 
     res.json({ ok: true, product, attributes: attrs });
   } catch (err) {
@@ -734,7 +809,8 @@ router.post('/compatibility', (req, res) => {
           SELECT spa.attr_value
           FROM supplier_product_attrs spa
           JOIN attr_aliases aa ON LOWER(aa.alias) = LOWER(spa.attr_name)
-          WHERE spa.ean = ? AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
+          WHERE (spa.normalized_ean = normalize_ean(?) OR spa.ean = ? OR spa.ean = '0' || ? OR normalize_ean(spa.ean) = normalize_ean(?))
+            AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
           LIMIT 1
         ) AS supplier_value
       FROM category_attributes ca
@@ -746,7 +822,7 @@ router.post('/compatibility', (req, res) => {
     const compMap = {};
     for (const item of catalogItems) {
       if (!compMap[item.category_name]) compMap[item.category_name] = {};
-      const attrs = attrForCompStmt.all(item.canonical_ean, item.id, item.category_id);
+      const attrs = attrForCompStmt.all(item.canonical_ean, item.canonical_ean, item.canonical_ean, item.canonical_ean, item.id, item.category_id);
       for (const a of attrs) {
         const hasManual = a.value_text !== null || a.value_numeric !== null;
         let val;

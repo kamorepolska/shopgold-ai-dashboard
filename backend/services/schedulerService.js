@@ -41,6 +41,12 @@ function registerJob(supplier) {
   const task = cron.schedule(expr, async () => {
     console.log(`[scheduler] ▶ Auto-refresh hurtowni "${supplier.name}" (ID ${id}) ...`);
     try {
+      if (svc.isSupplierRefreshing && svc.isSupplierRefreshing(id)) {
+        console.log(`[scheduler] ⏭ "${supplier.name}" — pominięto, odświeżanie już trwa`);
+        svc.addLog({ supplier_id: id, action: 'auto_refresh', status: 'warn',
+          details: 'Pominięto: poprzedni cykl jeszcze trwa' });
+        return;
+      }
       const result = await svc.refreshSupplier(id);
       svc.markScheduledRun(id);
       svc.addLog({ supplier_id: id, action: 'auto_refresh', status: 'ok',

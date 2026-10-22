@@ -510,7 +510,7 @@ router.post('/suppliers/:id/refresh', upload.single('file'), async (req, res) =>
         if (req.file) fs.unlink(req.file.path, () => {});
         send({ status: 'done', success: true, ...result });
       } catch (e) {
-        send({ status: 'error', error: e.message });
+        send({ status: 'error', error: e.message, code: e.code });
       }
       res.end();
     } else {
@@ -519,7 +519,10 @@ router.post('/suppliers/:id/refresh', upload.single('file'), async (req, res) =>
       if (req.file) fs.unlink(req.file.path, () => {});
       res.json({ success: true, ...result });
     }
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    const status = e.code === 'REFRESH_IN_PROGRESS' ? 409 : 400;
+    res.status(status).json({ error: e.message, code: e.code || null });
+  }
 });
 
 
@@ -995,10 +998,14 @@ router.get('/compare', (req, res) => {
     const search        = req.query.search || '';
     const manufacturer  = req.query.manufacturer || '';
     const supplier_id   = req.query.supplier_id || null;
-    const cacheKey = `compare:${onlyAvailable}:${minSavingsPct}:${search}:${manufacturer}:${supplier_id}`;
+    const limit         = req.query.limit != null && req.query.limit !== '' ? parseInt(req.query.limit, 10) : null;
+    const offset        = req.query.offset ? parseInt(req.query.offset, 10) : 0;
+    const sortCol       = req.query.sortCol || null;
+    const sortAsc       = req.query.sortAsc !== 'false' && req.query.sortAsc !== '0';
+    const cacheKey = `compare:${onlyAvailable}:${minSavingsPct}:${search}:${manufacturer}:${supplier_id}:${limit}:${offset}:${sortCol}:${sortAsc}`;
     const cached = getCached(cacheKey);
     if (cached) return res.json({ ...cached, _cached: true });
-    const result = svc.buildComparison({ onlyAvailable, minSavingsPct, search, manufacturer, supplier_id });
+    const result = svc.buildComparison({ onlyAvailable, minSavingsPct, search, manufacturer, supplier_id, limit, offset, sortCol, sortAsc });
     setCached(cacheKey, result);
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }

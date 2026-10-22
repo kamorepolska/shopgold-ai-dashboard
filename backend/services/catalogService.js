@@ -5,31 +5,7 @@
  * ===================================================================== */
 'use strict';
 
-// ─── EAN Normalization ──────────────────────────────────────────────────────────
-
-/**
- * Normalizuje EAN do postaci kanonicznej (EAN-13 bez wiodącego zera).
- * Obsługuje:
- *  - EAN-13 (13 cyfr) → bez zmian
- *  - EAN-14 z wiodącym zerem (0 + 13 cyfr) → obcinamy do 13
- *  - UPC-A (12 cyfr) → bez zmian (zostawiamy jako 12)
- *  - Krótsze kody → bez zmian
- * 
- * @param {string} ean 
- * @returns {string} canonical EAN
- */
-function normalizeEan(ean) {
-  if (!ean) return '';
-  let clean = String(ean).trim().replace(/\s+/g, '').replace(/[^0-9]/g, '');
-  if (!clean) return '';
-
-  // EAN-14 z wiodącym zerem → obetnij do EAN-13
-  if (clean.length === 14 && clean.startsWith('0')) {
-    clean = clean.substring(1);
-  }
-
-  return clean;
-}
+const { normalizeEan, eanMatch, eanVariants, registerNormalizeEan } = require('./eanUtil');
 
 // ─── Product Name Cleaning ─────────────────────────────────────────────────────
 
@@ -182,26 +158,6 @@ function normalizeManufacturer(raw) {
   }).join(' ');
 }
 
-
-/**
- * Sprawdza, czy dwa EAN-y to ten sam produkt.
- * Uwzględnia warianty z zerem na początku.
- */
-function eanMatch(ean1, ean2) {
-  const n1 = normalizeEan(ean1);
-  const n2 = normalizeEan(ean2);
-  if (!n1 || !n2) return false;
-  if (n1 === n2) return true;
-
-  // Jeden z nich z dodatkowym zerem
-  if (n1 === '0' + n2 || n2 === '0' + n1) return true;
-
-  // UPC (12) vs EAN-13 (z zerem z przodu)
-  if (n1.length === 12 && n2.length === 13 && n2.startsWith('0') && n2.substring(1) === n1) return true;
-  if (n2.length === 12 && n1.length === 13 && n1.startsWith('0') && n1.substring(1) === n2) return true;
-
-  return false;
-}
 
 // ─── Dimensions Parser ──────────────────────────────────────────────────────────
 
@@ -716,14 +672,123 @@ function autoGenerateAttributes(db, categoryId, categoryName) {
  * @param {object} db - instancja better-sqlite3 
  * @param {number} supplierId - ID hurtowni, która właśnie się odświeżyła
  */
+function loadLiveOffersForEan(db, canonical) {
+  const variants = eanVariants(canonical);
+  const placeholders = variants.map(() => '?').join(',') || '?';
+  const norm = normalizeEan(canonical) || canonical;
+  const sql = `
+    SELECT sp.ean, sp.name, sp.manufacturer, sp.manufacturer_code, sp.price_pln, sp.stock_quantity,
+           sp.weight_g, sp.supplier_id, sp.category, sp.attributes, s.name as supplier_name
+    FROM supplier_products sp
+    JOIN suppliers s ON s.id = sp.supplier_id
+    WHERE ${hasNormalizedEanColumn(db)
+      ? `(sp.normalized_ean = ? OR sp.ean IN (${placeholders}))`
+      : `sp.ean IN (${placeholders})`}
+  `;
+  const params = hasNormalizedEanColumn(db)
+    ? [norm, ...(variants.length ? variants : [canonical])]
+    : (variants.length ? variants : [canonical]);
+  return db.prepare(sql).all(...params);
+}
+
+function hasNormalizedEanColumn(db) {
+  if (!db._hasNormalizedEan) {
+    try {
+      const cols = db.prepare('PRAGMA table_info(supplier_products)').all().map(c => c.name);
+      db._hasNormalizedEan = cols.includes('normalized_ean');
+    } catch (_) {
+      db._hasNormalizedEan = false;
+    }
+  }
+  return db._hasNormalizedEan;
+}
+
+function pruneStaleSupplierOffers(db, supplierId, currentCanonicalSet) {
+  let pruned = 0;
+  let listed = [];
+  try {
+    listed = db.prepare(`
+      SELECT id, canonical_ean, all_eans, original_names
+      FROM catalog_master
+      WHERE EXISTS (
+        SELECT 1 FROM json_each(supplier_ids) WHERE CAST(value AS INTEGER) = ?
+      )
+    `).all(supplierId);
+  } catch (_) {
+    return 0;
+  }
+  if (!listed.length) return 0;
+
+  const update = db.prepare(`
+    UPDATE catalog_master
+    SET supplier_ids = ?, supplier_names = ?, best_price_pln = ?, avg_price_pln = ?,
+        total_stock = ?, original_names = ?, last_updated = datetime('now')
+    WHERE id = ?
+  `);
+
+  const tx = db.transaction(() => {
+    for (const row of listed) {
+      const keys = new Set(eanVariants(row.canonical_ean).map(normalizeEan));
+      try {
+        const extra = JSON.parse(row.all_eans || '[]');
+        if (Array.isArray(extra)) extra.forEach(e => { const n = normalizeEan(e); if (n) keys.add(n); });
+      } catch (_) {}
+      let stillHere = false;
+      for (const k of keys) {
+        if (currentCanonicalSet.has(k)) { stillHere = true; break; }
+      }
+      if (stillHere) continue;
+
+      const live = loadLiveOffersForEan(db, row.canonical_ean);
+      const supplierMap = new Map();
+      let totalStock = 0, priceSum = 0, priceCount = 0, bestPrice = Infinity;
+      for (const sp of live) {
+        supplierMap.set(sp.supplier_id, sp.supplier_name);
+        if (sp.stock_quantity > 0) totalStock += sp.stock_quantity;
+        if (sp.price_pln > 0) {
+          priceSum += sp.price_pln;
+          priceCount++;
+          if (sp.price_pln < bestPrice) bestPrice = sp.price_pln;
+        }
+      }
+      let orig = {};
+      try { orig = JSON.parse(row.original_names || '{}'); } catch (_) {}
+      const keepNames = new Set([...supplierMap.values()]);
+      for (const k of Object.keys(orig)) {
+        if (!keepNames.has(k)) delete orig[k];
+      }
+      update.run(
+        JSON.stringify([...supplierMap.keys()]),
+        JSON.stringify([...supplierMap.values()]),
+        bestPrice === Infinity ? 0 : bestPrice,
+        priceCount ? priceSum / priceCount : 0,
+        totalStock,
+        JSON.stringify(orig),
+        row.id
+      );
+      pruned++;
+    }
+  });
+  tx();
+  return pruned;
+}
+
 function rebuildCatalogForSupplier(db, supplierId) {
   // Pobierz nazwę hurtowni
   const supplier = db.prepare('SELECT id, name FROM suppliers WHERE id = ?').get(supplierId);
-  if (!supplier) return { updated: 0, created: 0 };
+  if (!supplier) return { updated: 0, created: 0, pruned: 0 };
 
   // Pobierz wszystkie produkty tej hurtowni
   const products = db.prepare('SELECT * FROM supplier_products WHERE supplier_id = ?').all(supplierId);
-  if (!products.length) return { updated: 0, created: 0 };
+  const currentCanonicalSet = new Set();
+  for (const p of products) {
+    const canonical = normalizeEan(p.ean);
+    if (canonical) currentCanonicalSet.add(canonical);
+  }
+  if (!products.length) {
+    const pruned = pruneStaleSupplierOffers(db, supplierId, currentCanonicalSet);
+    return { updated: 0, created: 0, pruned, total: pruned };
+  }
 
   // Przygotuj statements
   const findByEan = db.prepare('SELECT * FROM catalog_master WHERE canonical_ean = ?');
@@ -769,8 +834,15 @@ function rebuildCatalogForSupplier(db, supplierId) {
       const firstProd = prods[0];
       let mfrCode = firstProd.manufacturer_code || '';
       
-      // Szukaj istniejącego wpisu
+      // Szukaj istniejącego wpisu (canonical + warianty EAN)
       let existing = findByEan.get(canonical);
+      if (!existing) {
+        for (const v of eanVariants(canonical)) {
+          if (v === canonical) continue;
+          existing = findByEan.get(v);
+          if (existing) break;
+        }
+      }
 
       // Jeśli nie znaleziono po EAN, spróbuj po kodzie producenta
       if (!existing && mfrCode) {
@@ -785,14 +857,8 @@ function rebuildCatalogForSupplier(db, supplierId) {
         }
       }
 
-      // Pobierz wszystkie produkty z tym EAN-em ze wszystkich hurtowni
-      const allWithEan = db.prepare(`
-        SELECT sp.ean, sp.name, sp.manufacturer, sp.manufacturer_code, sp.price_pln, sp.stock_quantity, 
-               sp.weight_g, sp.supplier_id, sp.category, sp.attributes, s.name as supplier_name
-        FROM supplier_products sp 
-        JOIN suppliers s ON s.id = sp.supplier_id 
-        WHERE sp.ean = ? OR sp.ean = ? OR sp.ean = ?
-      `).all(canonical, '0' + canonical, canonical.replace(/^0/, ''));
+      // Pobierz aktualne oferty ze wszystkich hurtowni (bez trzymania starych supplier_ids)
+      const allWithEan = loadLiveOffersForEan(db, canonical);
 
       // Zbierz unikalne hurtownie + oryginalne nazwy
       const supplierMap = new Map();
@@ -836,15 +902,12 @@ function rebuildCatalogForSupplier(db, supplierId) {
         }
       }
 
-      // Dodaj EAN-y z istniejącego wpisu
+      // Zachowaj znane warianty EAN, ale NIE doklejaj hurtowni, których już nie ma w feedzie
       if (existing) {
-        const existingEans = JSON.parse(existing.all_eans || '[]');
-        existingEans.forEach(e => allEanSet.add(e));
-        const existingSids = JSON.parse(existing.supplier_ids || '[]');
-        const existingSnames = JSON.parse(existing.supplier_names || '[]');
-        existingSids.forEach((sid, i) => {
-          if (!supplierMap.has(sid)) supplierMap.set(sid, existingSnames[i] || '');
-        });
+        try {
+          const existingEans = JSON.parse(existing.all_eans || '[]');
+          existingEans.forEach(e => allEanSet.add(e));
+        } catch (_) {}
       }
 
       const allEans = JSON.stringify([...allEanSet]);
@@ -909,7 +972,12 @@ function rebuildCatalogForSupplier(db, supplierId) {
         let mergedOrig = origNames;
         try {
           const prev = JSON.parse(existing.original_names || '{}');
-          mergedOrig = { ...prev, ...origNames };
+          const keepNames = new Set([...supplierMap.values()]);
+          mergedOrig = {};
+          for (const [k, v] of Object.entries(prev)) {
+            if (keepNames.has(k)) mergedOrig[k] = v;
+          }
+          Object.assign(mergedOrig, origNames);
         } catch {}
 
         updateMaster.run(
@@ -948,7 +1016,8 @@ function rebuildCatalogForSupplier(db, supplierId) {
 
   transaction();
 
-  return { created, updated, total: created + updated };
+  const pruned = pruneStaleSupplierOffers(db, supplierId, currentCanonicalSet);
+  return { created, updated, pruned, total: created + updated };
 }
 
 /**
@@ -1006,19 +1075,23 @@ function getCatalogStats(db) {
  * Wyszukiwanie / przeglądanie katalogu z paginacją.
  */
 function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch = '', supplierName = '', supplierIds = [], categoryId = null, inSubiekt = null, availability = null, attrFilters = {}, condition = 'new', page = 1, limit = 50, sort = 'name', order = 'asc' } = {}) {
+  registerNormalizeEan(db);
   let where = 'WHERE 1=1';
   const params = [];
   let joinSubiekt = '';
   let joinAttrs = '';
   let joinSupplierCondition = '';
+  const liveOfferMatch = hasNormalizedEanColumn(db)
+    ? `COALESCE(NULLIF(sp_x.normalized_ean, ''), normalize_ean(sp_x.ean)) = normalize_ean(cm.canonical_ean)`
+    : `normalize_ean(sp_x.ean) = normalize_ean(cm.canonical_ean)`;
 
   if (availability) {
-    where += ' AND EXISTS (SELECT 1 FROM supplier_products sp_avail WHERE sp_avail.ean = cm.canonical_ean AND sp_avail.availability = ?)';
+    where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.availability = ?)`;
     params.push(availability);
   }
 
   if (condition) {
-    where += ' AND EXISTS (SELECT 1 FROM supplier_products sp_cond WHERE sp_cond.ean = cm.canonical_ean AND sp_cond.condition = ?)';
+    where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.condition = ?)`;
     params.push(condition);
   }
 
@@ -1090,7 +1163,9 @@ function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch 
   }
   // Filtr Subiekt: 'yes' = tylko w Subiekt, 'no' = tylko brak w Subiekt
   if (inSubiekt === 'yes' || inSubiekt === 'no') {
-    joinSubiekt = ' LEFT JOIN subiekt_products sp_f ON sp_f.ean = cm.canonical_ean';
+    joinSubiekt = hasNormalizedEanColumn(db)
+      ? ` LEFT JOIN subiekt_products sp_f ON COALESCE(NULLIF(sp_f.normalized_ean, ''), normalize_ean(sp_f.ean)) = normalize_ean(cm.canonical_ean)`
+      : ` LEFT JOIN subiekt_products sp_f ON normalize_ean(sp_f.ean) = normalize_ean(cm.canonical_ean)`;
     if (inSubiekt === 'yes') where += ' AND sp_f.ean IS NOT NULL';
     else where += ' AND sp_f.ean IS NULL';
   }
@@ -1127,20 +1202,43 @@ function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch 
   `).all(...allParams, limit, offset);
 
 
-  // Prepare subiekt lookup
+  // Prepare subiekt lookup (canonical + warianty EAN)
   let findSubiekt;
-  try { findSubiekt = db.prepare('SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products WHERE ean = ? LIMIT 1'); } catch(_) {}
+  try {
+    findSubiekt = (ean) => {
+      const vars = eanVariants(ean);
+      if (!vars.length) return null;
+      const norm = normalizeEan(ean);
+      if (hasNormalizedEanColumn(db)) {
+        return db.prepare(
+          `SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products
+           WHERE normalized_ean = ? OR ean IN (${vars.map(() => '?').join(',')}) LIMIT 1`
+        ).get(norm, ...vars);
+      }
+      return db.prepare(
+        `SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products WHERE ean IN (${vars.map(() => '?').join(',')}) LIMIT 1`
+      ).get(...vars);
+    };
+  } catch(_) {}
 
   // Prepare best supplier lookup
   let findBestSupplier;
   try {
-    findBestSupplier = db.prepare(`
-      SELECT s.name FROM supplier_products sp
-      JOIN suppliers s ON s.id = sp.supplier_id
-      WHERE (sp.ean = ? OR sp.ean = ? OR sp.ean = ?)
-        AND sp.price_pln = ?
-      LIMIT 1
-    `);
+    findBestSupplier = (ean, price) => {
+      const vars = eanVariants(ean);
+      if (!vars.length) return null;
+      const norm = normalizeEan(ean);
+      const where = hasNormalizedEanColumn(db)
+        ? `(sp.normalized_ean = ? OR sp.ean IN (${vars.map(() => '?').join(',')}))`
+        : `sp.ean IN (${vars.map(() => '?').join(',')})`;
+      const params = hasNormalizedEanColumn(db) ? [norm, ...vars, price] : [...vars, price];
+      return db.prepare(`
+        SELECT s.name FROM supplier_products sp
+        JOIN suppliers s ON s.id = sp.supplier_id
+        WHERE ${where} AND sp.price_pln = ?
+        LIMIT 1
+      `).get(...params);
+    };
   } catch(_) {}
 
   // Parse JSON fields + enrich with Subiekt info + best supplier name
@@ -1156,7 +1254,7 @@ function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch 
     row.subiekt_sell_price = null;
     if (findSubiekt) {
       try {
-        const sub = findSubiekt.get(row.canonical_ean);
+        const sub = findSubiekt(row.canonical_ean);
         if (sub) {
           row.in_subiekt = true;
           row.subiekt_stock = sub.stock ?? null;
@@ -1170,7 +1268,7 @@ function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch 
     row.best_supplier_name = null;
     if (findBestSupplier && row.best_price_pln > 0 && row.supplier_ids.length > 0) {
       try {
-        const best = findBestSupplier.get(row.canonical_ean, '0' + row.canonical_ean, row.canonical_ean.replace(/^0/, ''), row.best_price_pln);
+        const best = findBestSupplier(row.canonical_ean, row.best_price_pln);
         if (best) row.best_supplier_name = best.name;
       } catch(_) {}
     }
@@ -1203,6 +1301,14 @@ function getCatalogManufacturers(db) {
  */
 function getCatalogEanPrices(db, ean) {
   if (!ean) return [];
+  const variants = eanVariants(ean);
+  const placeholders = variants.map(() => '?').join(',') || '?';
+  const params = variants.length ? variants : [ean];
+  const norm = normalizeEan(ean);
+  const where = hasNormalizedEanColumn(db)
+    ? `(sp.normalized_ean = ? OR sp.ean IN (${placeholders}))`
+    : `sp.ean IN (${placeholders})`;
+  const whereParams = hasNormalizedEanColumn(db) ? [norm, ...params] : params;
   const rows = db.prepare(`
     SELECT sp.price_pln, sp.availability, sp.stock_quantity,
            sp.manufacturer_code AS sku, sp.category AS supplier_category, sp.manufacturer AS supplier_manufacturer,
@@ -1210,9 +1316,9 @@ function getCatalogEanPrices(db, ean) {
            s.name AS supplier_name, s.id AS supplier_id, s.currency
     FROM supplier_products sp
     JOIN suppliers s ON s.id = sp.supplier_id
-    WHERE sp.ean = ? OR sp.ean = ? OR sp.ean = ?
+    WHERE ${where}
     ORDER BY CASE WHEN sp.price_pln > 0 THEN 0 ELSE 1 END, sp.price_pln ASC
-  `).all(ean, '0' + ean, ean.replace(/^0/, ''));
+  `).all(...whereParams);
   
   // Parse attributes
   rows.forEach(r => {
@@ -1223,9 +1329,16 @@ function getCatalogEanPrices(db, ean) {
   // Enrich with Subiekt data
   let subiekt = null;
   try {
-    const sub = db.prepare(
-      'SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products WHERE ean = ? OR ean = ? OR ean = ? LIMIT 1'
-    ).get(ean, '0' + ean, ean.replace(/^0/, ''));
+    const subVariants = eanVariants(ean);
+    const subParams = subVariants.length ? subVariants : [ean];
+    const sub = hasNormalizedEanColumn(db)
+      ? db.prepare(
+          `SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products
+           WHERE normalized_ean = ? OR ean IN (${subParams.map(() => '?').join(',')}) LIMIT 1`
+        ).get(normalizeEan(ean), ...subParams)
+      : db.prepare(
+          `SELECT ean, stock, name, buy_price, sell_price FROM subiekt_products WHERE ean IN (${subParams.map(() => '?').join(',')}) LIMIT 1`
+        ).get(...subParams);
     if (sub) subiekt = sub;
   } catch(_) {}
 
@@ -1682,7 +1795,13 @@ function getProductDetails(db, productId) {
   // Subiekt info
   let subiekt = null;
   try {
-    subiekt = db.prepare('SELECT * FROM subiekt_products WHERE ean = ? LIMIT 1').get(product.canonical_ean);
+    const subVars = eanVariants(product.canonical_ean);
+    if (subVars.length) {
+      const norm = normalizeEan(product.canonical_ean);
+      subiekt = hasNormalizedEanColumn(db)
+        ? db.prepare(`SELECT * FROM subiekt_products WHERE normalized_ean = ? OR ean IN (${subVars.map(() => '?').join(',')}) LIMIT 1`).get(norm, ...subVars)
+        : db.prepare(`SELECT * FROM subiekt_products WHERE ean IN (${subVars.map(() => '?').join(',')}) LIMIT 1`).get(...subVars);
+    }
   } catch(_) {}
 
   // Category info
@@ -1703,8 +1822,13 @@ function getProductDetails(db, productId) {
         SELECT s.name as supplier_name, sp.${attrCol} as raw_attributes
         FROM supplier_products sp
         JOIN suppliers s ON s.id = sp.supplier_id
-        WHERE sp.ean = ? AND sp.${attrCol} IS NOT NULL AND sp.${attrCol} != '{}' AND sp.${attrCol} != ''
-      `).all(product.canonical_ean).map(row => {
+        WHERE (${hasNormalizedEanColumn(db) ? 'sp.normalized_ean = ? OR ' : ''}sp.ean IN (${eanVariants(product.canonical_ean).map(() => '?').join(',') || '?'}))
+          AND sp.${attrCol} IS NOT NULL AND sp.${attrCol} != '{}' AND sp.${attrCol} != ''
+      `).all(
+        ...(hasNormalizedEanColumn(db)
+          ? [normalizeEan(product.canonical_ean), ...eanVariants(product.canonical_ean)]
+          : (eanVariants(product.canonical_ean).length ? eanVariants(product.canonical_ean) : [product.canonical_ean]))
+      ).map(row => {
         try {
           const raw = row.raw_attributes;
           row.raw_attributes = (typeof raw === 'string') ? JSON.parse(raw) : (raw || {});
@@ -3317,6 +3441,7 @@ Odpowiedz TYLKO JSON array [{\"name\": \"...\", \"category_id\": X}, ...]`;
 module.exports = {
   normalizeEan,
   eanMatch,
+  eanVariants,
   parseDimensions,
   rebuildCatalogForSupplier,
   rebuildEntireCatalog,

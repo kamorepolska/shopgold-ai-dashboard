@@ -16,6 +16,10 @@ const Database = require('better-sqlite3');
 const ftp      = require('basic-ftp');
 const SftpClient = require('ssh2-sftp-client');
 const AdmZip   = require('adm-zip');
+const {
+  normalizeEan, eanVariants, registerNormalizeEan,
+  buildCatalogEanGroups,
+} = require('./eanUtil');
 
 
 
@@ -35,11 +39,39 @@ function getDb(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const db = new Database(require('path').join(dataDir, 'shopgold_cache.db'));
   initSourcingSchema(db);
+  registerNormalizeEan(db);
   _dbCache.set(dataDir, db);
   return db;
 }
 
+function backfillNormalizedEans(db) {
+  try {
+    const spMissing = db.prepare(
+      "SELECT COUNT(*) AS c FROM supplier_products WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')"
+    ).get().c;
+    if (spMissing > 0) {
+      db.exec("UPDATE supplier_products SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+    }
+  } catch (e) {
+    console.warn('[sourcing] backfill supplier normalized_ean:', e.message);
+  }
+  try {
+    const subMissing = db.prepare(
+      "SELECT COUNT(*) AS c FROM subiekt_products WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')"
+    ).get().c;
+    if (subMissing > 0) {
+      db.exec("UPDATE subiekt_products SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+    }
+  } catch (e) {
+    console.warn('[sourcing] backfill subiekt normalized_ean:', e.message);
+  }
+  try {
+    db.exec("UPDATE supplier_product_attrs SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+  } catch (_) {}
+}
+
 function initSourcingSchema(db) {
+  registerNormalizeEan(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS subiekt_products (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -287,6 +319,8 @@ function initSourcingSchema(db) {
     "ALTER TABLE suppliers ADD COLUMN action_customer_id TEXT",
     "ALTER TABLE suppliers ADD COLUMN action_user_name TEXT",
     "ALTER TABLE suppliers ADD COLUMN action_api_key TEXT",
+    "ALTER TABLE supplier_products ADD COLUMN normalized_ean TEXT",
+    "ALTER TABLE subiekt_products ADD COLUMN normalized_ean TEXT",
   ];
 
   for (const m of migrations) {
@@ -423,7 +457,26 @@ function initSourcingSchema(db) {
       price REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS supplier_product_attrs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      ean TEXT NOT NULL,
+      normalized_ean TEXT,
+      attr_name TEXT NOT NULL,
+      attr_value TEXT,
+      UNIQUE(supplier_id, ean, attr_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_spa_ean ON supplier_product_attrs(ean);
+    CREATE INDEX IF NOT EXISTS idx_spa_norm_ean ON supplier_product_attrs(normalized_ean);
+    CREATE INDEX IF NOT EXISTS idx_spa_supplier ON supplier_product_attrs(supplier_id);
   `);
+
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_sp_normalized_ean ON supplier_products(normalized_ean)'); } catch (_) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_sub_normalized_ean ON subiekt_products(normalized_ean)'); } catch (_) {}
+  try { db.exec("ALTER TABLE supplier_product_attrs ADD COLUMN normalized_ean TEXT"); } catch (_) {}
+
+  backfillNormalizedEans(db);
 
   // Data cleanup: fix any product names/manufacturers stored as '[object Object]' from XML parsing bugs
   try {
@@ -689,9 +742,9 @@ function _doImportSubiekt(dataRows, headers, idx) {
   db.transaction(() => {
     db.prepare('DELETE FROM subiekt_products').run();
     const ins = db.prepare(
-      'INSERT INTO subiekt_products (ean, name, stock, buy_price, sell_price, sold_12m, sold_30d, buy_price_date, weight_g, sell_price_allegro, sell_price_idealpc, buy_price_gross) VALUES (@ean, @name, @stock, @buy_price, @sell_price, @sold_12m, @sold_30d, @buy_price_date, @weight_g, @sell_price_allegro, @sell_price_idealpc, @buy_price_gross)'
+      'INSERT INTO subiekt_products (ean, normalized_ean, name, stock, buy_price, sell_price, sold_12m, sold_30d, buy_price_date, weight_g, sell_price_allegro, sell_price_idealpc, buy_price_gross) VALUES (@ean, @normalized_ean, @name, @stock, @buy_price, @sell_price, @sold_12m, @sold_30d, @buy_price_date, @weight_g, @sell_price_allegro, @sell_price_idealpc, @buy_price_gross)'
     );
-    for (const p of products) ins.run(p);
+    for (const p of products) ins.run({ ...p, normalized_ean: normalizeEan(p.ean) });
   })();
 
   addLog({ action: 'subiekt_import', status: 'ok', details: `Zaimportowano ${products.length} produktow` });
@@ -3208,7 +3261,28 @@ function translateAttrKeys(attrs) {
   return result;
 }
 
+const _refreshLocks = new Map();
+
+function isSupplierRefreshing(id) {
+  return _refreshLocks.has(Number(id));
+}
+
 async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent = false) {
+  const sid = Number(id);
+  if (_refreshLocks.has(sid)) {
+    const err = new Error('Odświeżanie tej hurtowni już trwa — poczekaj na zakończenie bieżącego cyklu');
+    err.code = 'REFRESH_IN_PROGRESS';
+    throw err;
+  }
+  _refreshLocks.set(sid, Date.now());
+  try {
+    return await _refreshSupplierUnlocked(sid, fileBuffer, onProgress, silent);
+  } finally {
+    _refreshLocks.delete(sid);
+  }
+}
+
+async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null, silent = false) {
   const db = getDb();
   const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
   if (!supplier) throw new Error('Hurtownia nie znaleziona');
@@ -3407,7 +3481,7 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
   db.transaction(() => {
     db.prepare('DELETE FROM supplier_products WHERE supplier_id = ?').run(id);
     const ins = db.prepare(
-      'INSERT INTO supplier_products (supplier_id, ean, name, manufacturer, manufacturer_code, price, price_pln, price_gross, price_srp, price_eur, price_regular, discount_percent, vat, availability, condition, warranty, warranty_months, is_being_ordered, delivery_date, package_size, stock_quantity, stock_reserved, incoming_stock, shipping_time_hours, is_special_offer, is_eol, is_non_returnable, is_large_product, weight_g, weight_net_g, unit_measure, category, pcn_code, volume, product_url, product_type, availability_info, related_products, date_added, description, photos, supplier_product_id, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, manufacturer, manufacturer_code, price, price_pln, price_gross, price_srp, price_eur, price_regular, discount_percent, vat, availability, condition, warranty, warranty_months, is_being_ordered, delivery_date, package_size, stock_quantity, stock_reserved, incoming_stock, shipping_time_hours, is_special_offer, is_eol, is_non_returnable, is_large_product, weight_g, weight_net_g, unit_measure, category, pcn_code, volume, product_url, product_type, availability_info, related_products, date_added, description, photos, supplier_product_id, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const getHistory = db.prepare('SELECT price_pln, recorded_at FROM price_history WHERE supplier_id=? AND ean=? ORDER BY recorded_at DESC LIMIT 1');
     const insHistory = db.prepare('INSERT INTO price_history (supplier_id, ean, price_pln) VALUES (?, ?, ?)');
@@ -3427,6 +3501,7 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
       ins.run(
         id,                              // supplier_id
         p.ean,                           // ean
+        normalizeEan(p.ean),             // normalized_ean
         p.name,                          // name
         p.manufacturer,                  // manufacturer
         p.manufacturer_code || '',       // manufacturer_code
@@ -3493,6 +3568,8 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
     db.prepare("DELETE FROM price_history WHERE recorded_at < datetime('now', '-90 days')").run();
 
     db.prepare("UPDATE suppliers SET product_count=?, last_refresh=datetime('now') WHERE id=?").run(merged.length, id);
+
+    replaceSupplierProductAttrs(db, id, merged);
   })();
 
   addLog({ supplier_id: id, action: 'refresh', status: 'ok', details: `Scalono ${merged.length} SKU (${supplierFiles.length} dodatkowych plikow, kurs: ${rateToUse.toFixed(4)})` });
@@ -3516,13 +3593,45 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
   try {
     const catalogService = require('./catalogService');
     const catResult = catalogService.rebuildCatalogForSupplier(db, id);
-    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych` });
+    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych, ${catResult.pruned || 0} usuniętych ofert` });
   } catch(catErr) {
     console.error('[catalog_update] ERROR:', catErr.message, catErr.stack);
     addLog({ supplier_id: id, action: 'catalog_update', status: 'error', details: catErr.message });
   }
 
+  try {
+    const sourcingRoutes = require('../routes/sourcing');
+    if (typeof sourcingRoutes._clearSourcingCache === 'function') sourcingRoutes._clearSourcingCache();
+  } catch (_) {}
+
   return { supplier_id: id, imported: merged.length };
+}
+
+function replaceSupplierProductAttrs(db, supplierId, products) {
+  try {
+    db.prepare('DELETE FROM supplier_product_attrs WHERE supplier_id = ?').run(supplierId);
+  } catch (_) {
+    return;
+  }
+  let ins;
+  try {
+    ins = db.prepare(
+      'INSERT OR REPLACE INTO supplier_product_attrs (supplier_id, ean, normalized_ean, attr_name, attr_value) VALUES (?, ?, ?, ?, ?)'
+    );
+  } catch (_) {
+    return;
+  }
+  for (const p of products) {
+    const attrs = p.attributes;
+    if (!attrs || typeof attrs !== 'object') continue;
+    const norm = normalizeEan(p.ean);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (!k || v == null) continue;
+      const val = String(v).trim();
+      if (!val || val === '-' || val === '0') continue;
+      ins.run(supplierId, p.ean, norm, String(k).slice(0, 200), val.slice(0, 2000));
+    }
+  }
 }
 
 async function refreshAllSuppliers() {
@@ -3533,6 +3642,10 @@ async function refreshAllSuppliers() {
 
   for (const s of suppliers) {
     try {
+      if (isSupplierRefreshing(s.id)) {
+        results.push({ id: s.id, name: s.name, status: 'skipped', error: 'Odświeżanie już trwa' });
+        continue;
+      }
       const r = await refreshSupplier(s.id, null, null, true);
       results.push({ id: s.id, name: s.name, status: 'ok', imported: r.imported });
       successList.push(`${s.name} (${r.imported} SKU)`);
@@ -3570,12 +3683,99 @@ async function refreshAllSuppliers() {
 
 // ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-function buildComparison({ onlyAvailable = false, minSavingsPct = null, search = '', manufacturer = '', supplier_id = null } = {}) {
+function loadCatalogEanGroups(db) {
+  try {
+    const rows = db.prepare('SELECT canonical_ean, all_eans FROM catalog_master').all();
+    return buildCatalogEanGroups(rows);
+  } catch (_) {
+    return new Map();
+  }
+}
+
+function indexOffersByNormalizedEan(allOffers) {
+  const offerMap = {};
+  for (const o of allOffers) {
+    if (!o.price_pln || o.price_pln <= 0) continue;
+    const key = normalizeEan(o.normalized_ean || o.ean);
+    if (!key) continue;
+    if (!offerMap[key]) offerMap[key] = [];
+    offerMap[key].push(o);
+  }
+  return offerMap;
+}
+
+function collectOffersForEan(ean, offerMap, catalogGroups) {
+  const key = normalizeEan(ean);
+  if (!key) return [];
+  const group = catalogGroups && catalogGroups.get(key);
+  const keys = group && group.size ? group : new Set([key]);
+  const out = [];
+  const seen = new Set();
+  for (const k of keys) {
+    const list = offerMap[k] || [];
+    for (const o of list) {
+      const id = `${o.supplier_id}:${o.ean}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(o);
+    }
+  }
+  return out;
+}
+
+function sortComparisonRows(rows, sortCol, sortAsc) {
+  const dir = sortAsc ? 1 : -1;
+  const list = [...rows];
+  if (!sortCol) {
+    list.sort((a, b) => (b.savings_pct || 0) - (a.savings_pct || 0));
+    return list;
+  }
+  list.sort((a, b) => {
+    let av;
+    let bv;
+    if (String(sortCol).startsWith('sup_')) {
+      const sid = parseInt(String(sortCol).replace('sup_', ''), 10);
+      av = a.supplier_prices?.[sid]?.price;
+      bv = b.supplier_prices?.[sid]?.price;
+    } else {
+      av = a[sortCol];
+      bv = b[sortCol];
+    }
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), 'pl', { numeric: true }) * dir;
+  });
+  return list;
+}
+
+function buildComparison({
+  onlyAvailable = false,
+  minSavingsPct = null,
+  search = '',
+  manufacturer = '',
+  supplier_id = null,
+  limit = null,
+  offset = 0,
+  sortCol = null,
+  sortAsc = true,
+} = {}) {
   const db = getDb();
 
   let subQuery = 'SELECT *, buy_price_date FROM subiekt_products WHERE 1=1';
   const params = [];
-  if (search) { subQuery += ' AND (name LIKE ? OR ean LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  if (search) {
+    subQuery += ' AND (name LIKE ? OR ean LIKE ? OR IFNULL(normalized_ean, \'\') LIKE ?';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    const digits = String(search).replace(/[^0-9]/g, '');
+    const vars = digits.length >= 8 ? eanVariants(digits) : [];
+    if (vars.length) {
+      subQuery += ` OR ean IN (${vars.map(() => '?').join(',')}) OR normalized_ean IN (${vars.map(() => '?').join(',')})`;
+      params.push(...vars, ...vars);
+    }
+    subQuery += ')';
+  }
 
   const subProducts = db.prepare(subQuery).all(...params);
 
@@ -3583,7 +3783,9 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
   const threeMonthsCutoff = threeMonthsAgo.toISOString().slice(0, 10);
-  if (!subProducts.length) return { rows: [], suppliers: [] };
+  if (!subProducts.length) {
+    return { rows: [], suppliers: [], allManufacturers: [], total: 0, limit: null, offset: 0, stats: { green: 0, yellow: 0, red: 0, totalSav: 0 } };
+  }
 
   const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
 
@@ -3604,14 +3806,8 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
   offerQuery += ' ORDER BY COALESCE(sp.price_pln, sp.price) ASC';
 
   const allOffers = db.prepare(offerQuery).all(...offerParams);
-
-  const offerMap = {};
-  for (const o of allOffers) {
-    // Skip offers with price 0 or null — these are noise (missing data)
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
 
   // Get all unique manufacturers from supplier products for filter dropdown
   const allManufacturersRaw = db.prepare(
@@ -3621,7 +3817,7 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
 
   const rows = [];
   for (const sub of subProducts) {
-    const offers = offerMap[sub.ean] || [];
+    const offers = collectOffersForEan(sub.ean, offerMap, catalogGroups);
     if (supplier_id && !offers.length) continue; // Skip if filtered by supplier and no offers
     const filtered = onlyAvailable ? offers.filter(o => o.availability === 'available') : offers;
     const best = filtered.length ? filtered.reduce((a, b) => a.price_pln < b.price_pln ? a : b) : null;
@@ -3682,11 +3878,31 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
     });
   }
 
-  return { rows, suppliers, allManufacturers };
+  const sorted = sortComparisonRows(rows, sortCol, sortAsc);
+  const stats = {
+    green: sorted.filter(r => r.signal === 'green').length,
+    yellow: sorted.filter(r => r.signal === 'yellow').length,
+    red: sorted.filter(r => r.signal === 'red').length,
+    totalSav: sorted.reduce((s, r) => s + (r.savings || 0), 0),
+  };
+  const total = sorted.length;
+  const pageOffset = Math.max(0, parseInt(offset, 10) || 0);
+  const pageLimit = limit == null || limit === '' ? null : Math.max(1, parseInt(limit, 10) || 100);
+  const pageRows = pageLimit == null ? sorted : sorted.slice(pageOffset, pageOffset + pageLimit);
+
+  return {
+    rows: pageRows,
+    suppliers,
+    allManufacturers,
+    total,
+    limit: pageLimit,
+    offset: pageOffset,
+    stats,
+  };
 }
 
 function exportComparisonCsv(options = {}) {
-  const { rows, suppliers } = buildComparison(options);
+  const { rows, suppliers } = buildComparison({ ...options, limit: null, offset: 0 });
   const supplierNames = suppliers.map(s => s.name);
   const header = ['EAN','Nazwa','Stan','Sprzedaz 30d','Sprzedaz 12m','Cena zakupu','Cena sprzedazy',
     'Najlepsza cena','Najtansza hurtownia','Oszczednosc (zl)','Oszczednosc (%)','Sygnal',
@@ -3723,7 +3939,7 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
 
   const subMap = {};
   db.prepare('SELECT ean, name, buy_price, sell_price, stock, sold_30d FROM subiekt_products').all()
-    .forEach(r => { subMap[r.ean] = r; });
+    .forEach(r => { subMap[normalizeEan(r.ean) || r.ean] = r; });
 
   const allOffers = db.prepare(`
     SELECT sp.ean, COALESCE(sp.price_pln, sp.price) as price_pln, sp.price,
@@ -3736,20 +3952,21 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
     ORDER BY price_pln ASC
   `).all();
 
-  const offerMap = {};
-  for (const o of allOffers) {
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
 
   const rows = [];
   const eans = new Set([...Object.keys(subMap), ...Object.keys(offerMap)]);
   const suppliers = db.prepare('SELECT id, name, currency FROM suppliers WHERE COALESCE(is_active, 1) = 1').all();
+  const seenGroups = new Set();
 
   for (const ean of eans) {
-    const sub = subMap[ean];
-    let offers = offerMap[ean] || [];
+    const group = catalogGroups.get(normalizeEan(ean));
+    const groupKey = group && group.size ? [...group].sort()[0] : (normalizeEan(ean) || ean);
+    if (seenGroups.has(groupKey)) continue;
+    seenGroups.add(groupKey);
+    const sub = subMap[ean] || subMap[normalizeEan(ean)] || (group ? [...group].map(k => subMap[k]).find(Boolean) : null);
+    let offers = collectOffersForEan(ean, offerMap, catalogGroups);
     if (onlyAvailable) offers = offers.filter(o => o.availability === 'available');
     if (!offers.length) continue;
 
@@ -3782,7 +3999,7 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
     }
 
     rows.push({
-      ean, name,
+      ean: sub?.ean || best.ean || ean, name,
       manufacturer: manufacturer,
       best_price: best.price_pln, best_supplier: best.supplier_name, best_supplier_id: best.supplier_id,
       ref_price: refPrice, ref_label: refLabel,
@@ -3809,7 +4026,7 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
 
   const subMap = {};
   db.prepare('SELECT ean, name, buy_price, sell_price, stock, sold_30d FROM subiekt_products').all()
-    .forEach(r => { subMap[r.ean] = r; });
+    .forEach(r => { subMap[normalizeEan(r.ean) || r.ean] = r; });
 
   const allOffers = db.prepare(`
     SELECT sp.ean, COALESCE(sp.price_pln, sp.price) as price_pln, sp.price,
@@ -3822,19 +4039,20 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
     ORDER BY price_pln ASC
   `).all();
 
-  const offerMap = {};
-  for (const o of allOffers) {
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
 
   const qualifyingRows = [];
   const eans = new Set([...Object.keys(subMap), ...Object.keys(offerMap)]);
+  const seenGroups = new Set();
 
   for (const ean of eans) {
-    const sub = subMap[ean];
-    let offers = offerMap[ean] || [];
+    const group = catalogGroups.get(normalizeEan(ean));
+    const groupKey = group && group.size ? [...group].sort()[0] : (normalizeEan(ean) || ean);
+    if (seenGroups.has(groupKey)) continue;
+    seenGroups.add(groupKey);
+    const sub = subMap[ean] || subMap[normalizeEan(ean)] || (group ? [...group].map(k => subMap[k]).find(Boolean) : null);
+    let offers = collectOffersForEan(ean, offerMap, catalogGroups);
     if (onlyAvailable) offers = offers.filter(o => o.availability === 'available');
     if (!offers.length) continue;
 
@@ -3897,7 +4115,7 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
     }
 
     qualifyingRows.push({
-      ean, name, manufacturer,
+      ean: sub?.ean || best.ean || ean, name, manufacturer,
       best_price: best.price_pln, best_supplier: best.supplier_name, best_supplier_id: best.supplier_id,
       ref_price: refPrice, ref_label: refLabel,
       deal_type: dealType, savings_pct: savingsPct,
@@ -3970,7 +4188,15 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
 function getMissingProducts({ supplier_id = null, search = '', availability = '', manufacturer = '', limit = 500, offset = 0 } = {}) {
   const db = getDb();
 
-  const subEans = new Set(db.prepare('SELECT DISTINCT ean FROM subiekt_products').all().map(r => r.ean));
+  const subEans = new Set(
+    db.prepare('SELECT DISTINCT ean FROM subiekt_products').all()
+      .flatMap(r => eanVariants(r.ean).map(normalizeEan).filter(Boolean))
+  );
+  const catalogGroups = loadCatalogEanGroups(db);
+  for (const ean of [...subEans]) {
+    const group = catalogGroups.get(ean);
+    if (group) group.forEach(k => subEans.add(k));
+  }
 
   // Build a global name/manufacturer/manufacturer_code lookup from ALL suppliers (for cross-referencing)
   // This ensures products from suppliers without names (e.g. Incom) can get names
@@ -3982,15 +4208,16 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
   for (const nr of nameRows) {
     const cleanName = (nr.name || '').trim();
     if (!cleanName || /^[.\-/?!_]+$/.test(cleanName)) continue;
-    if (!globalNameMap[nr.ean]) {
-      globalNameMap[nr.ean] = { name: nr.name, manufacturer: nr.manufacturer || '', manufacturer_code: nr.manufacturer_code || '' };
+    const nameKey = normalizeEan(nr.ean) || nr.ean;
+    if (!globalNameMap[nameKey]) {
+      globalNameMap[nameKey] = { name: nr.name, manufacturer: nr.manufacturer || '', manufacturer_code: nr.manufacturer_code || '' };
     } else {
       // Fill in missing manufacturer_code from other suppliers
-      if (!globalNameMap[nr.ean].manufacturer_code && nr.manufacturer_code) {
-        globalNameMap[nr.ean].manufacturer_code = nr.manufacturer_code;
+      if (!globalNameMap[nameKey].manufacturer_code && nr.manufacturer_code) {
+        globalNameMap[nameKey].manufacturer_code = nr.manufacturer_code;
       }
-      if (!globalNameMap[nr.ean].manufacturer && nr.manufacturer) {
-        globalNameMap[nr.ean].manufacturer = nr.manufacturer;
+      if (!globalNameMap[nameKey].manufacturer && nr.manufacturer) {
+        globalNameMap[nameKey].manufacturer = nr.manufacturer;
       }
     }
   }
@@ -4007,13 +4234,18 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
         manufacturer_code: cr.manufacturer_code || '',
         manufacturer: cr.manufacturer || ''
       };
+      catalogCodeMap[normalizeEan(cr.canonical_ean) || cr.canonical_ean] = info;
       catalogCodeMap[cr.canonical_ean] = info;
       if (cr.all_eans) {
         try {
           const variants = JSON.parse(cr.all_eans);
           if (Array.isArray(variants)) {
             for (const v of variants) {
-              if (v) catalogCodeMap[v] = info;
+              if (v) {
+                catalogCodeMap[v] = info;
+                const nv = normalizeEan(v);
+                if (nv) catalogCodeMap[nv] = info;
+              }
             }
           }
         } catch(_) {}
@@ -4038,12 +4270,14 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
 
   const eanAllOffers = {};
   for (const o of allOffers) {
-    if (subEans.has(o.ean)) continue;
+    const key = normalizeEan(o.ean);
+    if (!key) continue;
+    if (subEans.has(key)) continue;
     if (!o.price_pln || o.price_pln <= 0) continue;
     // NOTE: manufacturer filter is applied AFTER cross-referencing (see below),
     // so we collect all EANs here regardless of per-supplier manufacturer field.
-    if (!eanAllOffers[o.ean]) eanAllOffers[o.ean] = [];
-    eanAllOffers[o.ean].push(o);
+    if (!eanAllOffers[key]) eanAllOffers[key] = [];
+    eanAllOffers[key].push(o);
   }
 
   const eanMap = {};
@@ -5680,7 +5914,7 @@ module.exports = {
   importSubiektExcel, importSubiektCsv, getSubiektStatus,
   // suppliers
   listSuppliers, addSupplier, deleteSupplier, updateSupplier,
-  replaceSupplierFile, refreshSupplier, refreshAllSuppliers,
+  replaceSupplierFile, refreshSupplier, refreshAllSuppliers, isSupplierRefreshing,
   // supplier_files
   listSupplierFiles, addSupplierFile, updateSupplierFile, deleteSupplierFile, refreshOneSupplierFile,
   // schedule

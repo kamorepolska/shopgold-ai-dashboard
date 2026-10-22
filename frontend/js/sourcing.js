@@ -2417,6 +2417,10 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     if (filterSearch)    params.set('search', filterSearch);
     if (filterMfg)       params.set('manufacturer', filterMfg);
     if (filterSupplierId) params.set('supplier_id', filterSupplierId);
+    params.set('limit', String(comparePageSize));
+    params.set('offset', String(comparePage * comparePageSize));
+    if (sortCol) params.set('sortCol', sortCol);
+    params.set('sortAsc', sortAsc ? 'true' : 'false');
     const cacheKey = `compare:${params}`;
     const cached = getTabCache(cacheKey);
     if (cached) {
@@ -2463,12 +2467,17 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
         <p>Zaimportuj produkty z Subiekta i dodaj cenniki hurtowni.</p></div>`;
       return;
     }
+    if (data.total != null && comparePage > 0 && rows.length === 0 && data.total > 0) {
+      comparePage = Math.max(0, Math.ceil(data.total / comparePageSize) - 1);
+      renderCompare();
+      return;
+    }
 
-    const green  = rows.filter(r=>r.signal==='green').length;
-    const yellow = rows.filter(r=>r.signal==='yellow').length;
-    const red    = rows.filter(r=>r.signal==='red').length;
-    const totalSav = rows.reduce((s,r)=>s+(r.savings||0),0);
-    const sorted = sortRows([...rows]);
+    const green  = data.stats?.green ?? rows.filter(r=>r.signal==='green').length;
+    const yellow = data.stats?.yellow ?? rows.filter(r=>r.signal==='yellow').length;
+    const red    = data.stats?.red ?? rows.filter(r=>r.signal==='red').length;
+    const totalSav = data.stats?.totalSav ?? rows.reduce((s,r)=>s+(r.savings||0),0);
+    const sorted = rows;
     const hidden = getCmpHiddenCols();
     const isHidden = col => hidden.includes(col);
 
@@ -2585,14 +2594,14 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
       }
     }
 
-    // Pagination
-    const totalRows = sorted.length;
+    // Pagination — rows already sliced on the server
+    const totalRows = data.total != null ? data.total : sorted.length;
     const totalPages = Math.ceil(totalRows / comparePageSize) || 1;
-    if (comparePage >= totalPages) comparePage = totalPages - 1;
+    if (comparePage >= totalPages) comparePage = Math.max(0, totalPages - 1);
     if (comparePage < 0) comparePage = 0;
-    const pageStart = comparePage * comparePageSize;
-    const pageEnd = Math.min(pageStart + comparePageSize, totalRows);
-    const pageRows = sorted.slice(pageStart, pageEnd);
+    const pageStart = totalRows === 0 ? 0 : comparePage * comparePageSize;
+    const pageEnd = Math.min(pageStart + sorted.length, totalRows);
+    const pageRows = sorted;
 
     const tbody = pageRows.map(r => {
       const usedCls = (r.condition === 'used') ? ' class="row-used"' : '';
@@ -2720,18 +2729,18 @@ ${rows.length === 0
     // Filtry
     let searchTimer;
     document.getElementById('cmp-search').addEventListener('input', e => {
-      clearTimeout(searchTimer); searchTimer = setTimeout(() => { filterSearch = e.target.value; renderCompare(); }, 400);
+      clearTimeout(searchTimer); searchTimer = setTimeout(() => { filterSearch = e.target.value; comparePage = 0; renderCompare(); }, 400);
     });
-    document.getElementById('cmp-avail').addEventListener('change', e => { filterAvail = e.target.checked; renderCompare(); });
+    document.getElementById('cmp-avail').addEventListener('change', e => { filterAvail = e.target.checked; comparePage = 0; renderCompare(); });
     const mfgSel = document.getElementById('cmp-mfg');
-    if (mfgSel) mfgSel.addEventListener('change', e => { filterMfg = e.target.value; renderCompare(); });
+    if (mfgSel) mfgSel.addEventListener('change', e => { filterMfg = e.target.value; comparePage = 0; renderCompare(); });
     const supSel = document.getElementById('cmp-supplier');
-    if (supSel) supSel.addEventListener('change', e => { filterSupplierId = e.target.value; renderCompare(); });
-    document.getElementById('cmp-savings').addEventListener('change', e => { filterSavings = e.target.value; renderCompare(); });
+    if (supSel) supSel.addEventListener('change', e => { filterSupplierId = e.target.value; comparePage = 0; renderCompare(); });
+    document.getElementById('cmp-savings').addEventListener('change', e => { filterSavings = e.target.value; comparePage = 0; renderCompare(); });
     document.getElementById('cmp-refresh-btn').addEventListener('click', () => { comparePage=0; renderCompare(); });
-    document.getElementById('cmp-pg-prev')?.addEventListener('click', () => { comparePage--; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); });
-    document.getElementById('cmp-pg-next')?.addEventListener('click', () => { comparePage++; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); });
-    document.getElementById('cmp-page-size')?.addEventListener('change', e => { const v = parseInt(e.target.value); if (v >= 10) { comparePageSize = v; comparePage = 0; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+    document.getElementById('cmp-pg-prev')?.addEventListener('click', () => { comparePage--; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    document.getElementById('cmp-pg-next')?.addEventListener('click', () => { comparePage++; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    document.getElementById('cmp-page-size')?.addEventListener('change', e => { const v = parseInt(e.target.value); if (v >= 10) { comparePageSize = v; comparePage = 0; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
 
     // Kolumny toggle
     document.getElementById('cmp-cols-btn').addEventListener('click', () => {
@@ -2770,7 +2779,8 @@ ${rows.length === 0
         const col = th.dataset.col;
         if (sortCol === col) sortAsc = !sortAsc;
         else { sortCol = col; sortAsc = true; }
-        renderCompareTable(el, compareData);
+        comparePage = 0;
+        renderCompare();
       });
     });
 
