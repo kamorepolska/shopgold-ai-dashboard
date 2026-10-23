@@ -2487,15 +2487,20 @@ async function fetchImpaktProducts(apiUrl, user, pass) {
           ? (item.manufacturer.name || item.manufacturer.id || '')
           : String(item.manufacturer || '');
 
-        // --- Kategoria: bierzemy ID podkategorii z pierwszego wpisu ---
         let categoryStr = '';
         if (Array.isArray(item.categories) && item.categories.length > 0) {
           const firstCat = item.categories[0];
-          const mainId = firstCat.id || '';
-          const subId = (Array.isArray(firstCat.subcategories) && firstCat.subcategories.length > 0)
-            ? firstCat.subcategories[0].id || ''
-            : '';
-          categoryStr = subId ? `${mainId}|${subId}` : mainId;
+          const mainName = String(firstCat.name || firstCat.Name || '').trim();
+          const sub = (Array.isArray(firstCat.subcategories) && firstCat.subcategories.length > 0)
+            ? firstCat.subcategories[0]
+            : null;
+          const subName = sub ? String(sub.name || sub.Name || '').trim() : '';
+          categoryStr = [mainName, subName].filter(Boolean).join(' > ');
+          if (!categoryStr) {
+            const mainId = firstCat.id || '';
+            const subId = sub ? (sub.id || '') : '';
+            categoryStr = [mainId, subId].filter(Boolean).join(' > ');
+          }
         }
 
         // --- Atrybuty techniczne: { name: value } ---
@@ -3313,9 +3318,12 @@ async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null
         const l = (s.match(/[a-zA-Z]/g) || []).length;
         return d >= l && d > 1;
       };
-      if (!mergedMap[p.ean]) {
-        mergedMap[p.ean] = {
+      const eanKey = normalizeEan(p.ean) || String(p.ean || '').trim();
+      if (!eanKey) continue;
+      if (!mergedMap[eanKey]) {
+        mergedMap[eanKey] = {
           ...p,
+          ean: eanKey,
           manufacturer: isNum(p.manufacturer) ? '' : (p.manufacturer || ''),
           price_pln: pricePln,
           availability: p.availability || 'unknown',
@@ -3323,34 +3331,32 @@ async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null
         };
       } else {
         if (fileType === 'stock_price') {
-          mergedMap[p.ean].price = p.price;
-          mergedMap[p.ean].price_pln = pricePln;
-          mergedMap[p.ean].availability = p.availability || mergedMap[p.ean].availability;
-          mergedMap[p.ean].stock_quantity = p.stock_quantity ?? mergedMap[p.ean].stock_quantity;
+          if (Number(p.price) > 0) {
+            mergedMap[eanKey].price = p.price;
+            mergedMap[eanKey].price_pln = pricePln;
+          }
+          mergedMap[eanKey].availability = p.availability || mergedMap[eanKey].availability;
+          mergedMap[eanKey].stock_quantity = p.stock_quantity ?? mergedMap[eanKey].stock_quantity;
         } else {
-          // For 'full' extra files, only fill in missing price/stock
-          if (p.price > 0 && mergedMap[p.ean].price === 0) {
-            mergedMap[p.ean].price = p.price;
-            mergedMap[p.ean].price_pln = pricePln;
+          if (p.price > 0 && (!mergedMap[eanKey].price || mergedMap[eanKey].price === 0)) {
+            mergedMap[eanKey].price = p.price;
+            mergedMap[eanKey].price_pln = pricePln;
           }
-          if (mergedMap[p.ean].stock_quantity === null || mergedMap[p.ean].stock_quantity === undefined) {
-            mergedMap[p.ean].stock_quantity = p.stock_quantity;
+          if (mergedMap[eanKey].stock_quantity === null || mergedMap[eanKey].stock_quantity === undefined) {
+            mergedMap[eanKey].stock_quantity = p.stock_quantity;
           }
-          mergedMap[p.ean].availability = mergedMap[p.ean].availability === 'unknown' ? p.availability : mergedMap[p.ean].availability;
+          mergedMap[eanKey].availability = mergedMap[eanKey].availability === 'unknown' ? p.availability : mergedMap[eanKey].availability;
         }
-        mergedMap[p.ean].weight_g = p.weight_g || mergedMap[p.ean].weight_g;
-        if (fileType === 'full' || !mergedMap[p.ean].name) {
-          if (p.name) mergedMap[p.ean].name = p.name;
-          if (p.manufacturer && !isNum(p.manufacturer)) mergedMap[p.ean].manufacturer = p.manufacturer;
+        mergedMap[eanKey].weight_g = p.weight_g || mergedMap[eanKey].weight_g;
+        if (fileType === 'full' || !mergedMap[eanKey].name) {
+          if (p.name) mergedMap[eanKey].name = p.name;
+          if (p.manufacturer && !isNum(p.manufacturer)) mergedMap[eanKey].manufacturer = p.manufacturer;
         }
-        if (p.manufacturer_code && !mergedMap[p.ean].manufacturer_code) mergedMap[p.ean].manufacturer_code = p.manufacturer_code;
-        if (p.category && !mergedMap[p.ean].category) mergedMap[p.ean].category = p.category;
-        // Merge attributes: combine from all files (extra file attrs overwrite main if both have same key)
+        if (p.manufacturer_code && !mergedMap[eanKey].manufacturer_code) mergedMap[eanKey].manufacturer_code = p.manufacturer_code;
+        if (p.category && !mergedMap[eanKey].category) mergedMap[eanKey].category = p.category;
         if (p.attributes && Object.keys(p.attributes).length > 0) {
-          const existing = mergedMap[p.ean].attributes || {};
-          const existingCount = Object.keys(existing).length;
-          // Always merge — extra file can add new keys or fill missing ones
-          mergedMap[p.ean].attributes = { ...existing, ...p.attributes };
+          const existing = mergedMap[eanKey].attributes || {};
+          mergedMap[eanKey].attributes = { ...existing, ...p.attributes };
         }
       }
     }

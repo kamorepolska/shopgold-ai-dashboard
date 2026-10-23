@@ -1104,13 +1104,26 @@ function searchCatalog(db, { search = '', manufacturer = '', manufacturerSearch 
     : `normalize_ean(sp_x.ean) = normalize_ean(cm.canonical_ean)`;
 
   if (availability) {
-    where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.availability = ?)`;
-    params.push(availability);
+    if (availability === 'available') {
+      where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND (
+        sp_x.availability = 'available'
+        OR ((sp_x.availability IS NULL OR sp_x.availability = '' OR sp_x.availability = 'unknown') AND COALESCE(sp_x.stock_quantity, 0) > 0)
+      ))`;
+    } else {
+      where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.availability = ?)`;
+      params.push(availability);
+    }
   }
 
   if (condition) {
-    where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.condition = ?)`;
-    params.push(condition);
+    if (condition === 'new') {
+      where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND (
+        sp_x.condition = 'new' OR sp_x.condition IS NULL OR trim(sp_x.condition) = ''
+      ))`;
+    } else {
+      where += ` AND EXISTS (SELECT 1 FROM supplier_products sp_x WHERE ${liveOfferMatch} AND sp_x.condition = ?)`;
+      params.push(condition);
+    }
   }
 
   if (search) {
@@ -1973,16 +1986,19 @@ function getCategoryFilters(db, categoryId) {
     ORDER BY ca.sort_order ASC, ca.attr_name ASC
   `).all(categoryId);
 
-  // For each filter, get unique values
+  const scopeIds = attrSync.expandCategoryIds(db, [categoryId]);
+  const catScope = scopeIds.length ? scopeIds : [categoryId];
+  const scopePlaceholders = catScope.map(() => '?').join(',');
+
   for (const attr of filterAttrs) {
     const values = db.prepare(`
       SELECT DISTINCT pa.value_text 
       FROM product_attributes pa
       JOIN catalog_master cm ON cm.id = pa.catalog_id
       WHERE pa.attribute_id = ? AND pa.value_text IS NOT NULL AND pa.value_text != ''
-        AND cm.category_id = ?
+        AND cm.category_id IN (${scopePlaceholders})
       ORDER BY pa.value_text ASC
-    `).all(attr.id, categoryId);
+    `).all(attr.id, ...catScope);
     attr.values = values.map(v => v.value_text);
   }
 
@@ -3501,13 +3517,15 @@ function generateAbCategoryTree(db) {
     const ta = tokenize(a);
     const tb = tokenize(b);
     if (ta.length === 0 || tb.length === 0) return false;
+    if (ta.join(' ') === tb.join(' ')) return true;
     const shared = ta.filter(w => tb.includes(w)).length;
     const minLen = Math.min(ta.length, tb.length);
-    return shared >= minLen * 0.6 && shared >= 1;
+    const maxLen = Math.max(ta.length, tb.length);
+    return shared === minLen && shared / maxLen >= 0.8;
   }
 
   try {
-    db.prepare('UPDATE product_categories SET is_ab_category = 0, parent_id = NULL').run();
+    db.prepare('UPDATE product_categories SET is_ab_category = 0').run();
     db.prepare(`DELETE FROM product_categories WHERE
       name LIKE '%:%' OR name LIKE '%>%' OR name LIKE '%|%'
       OR name LIKE '<%' OR length(trim(name)) < 2`).run();
@@ -3587,8 +3605,8 @@ function generateAbCategoryTree(db) {
           created++;
         } catch (e) {
           const ex = db.prepare(
-            'SELECT id FROM product_categories WHERE lower(name)=lower(?) AND (parent_id IS ? OR parent_id=?)'
-          ).get(name, parentId, parentId);
+            'SELECT id FROM product_categories WHERE lower(name)=lower(?) LIMIT 1'
+          ).get(name);
           catId = ex ? ex.id : null;
         }
       }

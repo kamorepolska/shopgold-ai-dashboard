@@ -92,6 +92,12 @@ function registerFileJob(file) {
   const task = cron.schedule(expr, async () => {
     console.log(`[scheduler] ▶ Auto-refresh pliku (ID ${fid}) ...`);
     try {
+      if (svc.isSupplierRefreshing && svc.isSupplierRefreshing(file.supplier_id)) {
+        console.log(`[scheduler] ⏭ Plik ID ${fid} — pominięto, odświeżanie hurtowni już trwa`);
+        svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'warn',
+          details: `Plik ID ${fid}: pominięto, poprzedni cykl jeszcze trwa` });
+        return;
+      }
       const result = await svc.refreshSupplier(file.supplier_id);
       svc.markFileScheduledRun(fid);
       svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'ok',

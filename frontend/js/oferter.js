@@ -557,19 +557,30 @@ const ConfigState = {
   steps: [
     { id: 1,  key: 'cpu',         label: '1. Procesor',          type: 'single', categoryIds: [3691], catName: 'Procesory',              catAlias: ['procesor'] },
     { id: 2,  key: 'mb',          label: '2. Płyta główna',       type: 'single', categoryIds: [3695, 3967, 3944, 3956, 3950], catName: null,           catAlias: ['płyty główne', 'mainboards', 'motherboards', 'płyta główna'] },
-    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylatory do procesor', 'chłodzenie procesor', 'chłodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chłodzenie wodne', 'chłodzenie aio', 'chłodzenie'], catExclude: ['obudow', 'vga', 'wentylatory do obud'] },
-    { id: 4,  key: 'ram',         label: '4. Pamięć RAM',         type: 'single', categoryIds: [4211, 4282], catName: null,            catAlias: ['pamiec', 'dimm', 'so-dimm', 'pamięci do komputerów'] },
-    { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne'] },
+    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylatory do procesor', 'chłodzenie procesor', 'chłodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chłodzenie wodne', 'chłodzenie aio'], catExclude: ['obudow', 'vga', 'wentylatory do obud'] },
+    { id: 4,  key: 'ram',         label: '4. Pamięć RAM',         type: 'single', categoryIds: [4211, 4282], catName: null,            catAlias: ['pamięć ram', 'pamięci ram', 'moduł ram', 'moduły ram', 'dimm', 'so-dimm', 'pamięci do komputerów', 'arbeitsspeicher'], catExclude: ['masow', 'flash', 'pendrive', 'karta pamięci', 'czytnik', 'usb'] },
+    { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne', 'dysk ssd', 'dysk hdd', 'nvme'], catExclude: ['obudow', 'kieszen', 'adapter'] },
     { id: 6,  key: 'gpu',         label: '6. Karta graficzna',    type: 'single', categoryIds: [3694, 3987], catName: null,        catAlias: ['karta graficzna', 'karty graficzne'] },
     { id: 7,  key: 'psu',         label: '7. Zasilacz',           type: 'single', categoryIds: [3758], catName: 'Zasilacze',              catAlias: ['zasilacz', 'zasilacze'] },
     { id: 8,  key: 'casePc',      label: '8. Obudowa',            type: 'single', categoryIds: [3697, 3960], catName: null,                catAlias: ['obudow'] },
-    { id: 9,  key: 'os',          label: '9. System OS',          type: 'single', categoryIds: [3733], catName: 'Systemy operacyjne',     catAlias: ['systemy operacyjne', 'windows', 'os'] },
+    { id: 9,  key: 'os',          label: '9. System OS',          type: 'single', categoryIds: [3733], catName: 'Systemy operacyjne',     catAlias: ['systemy operacyjne', 'system operacyjny', 'operating system'] },
     { id: 10, key: 'accessories', label: '10. Akcesoria',         type: 'accessories' },
     { id: 11, key: 'services',    label: '11. Usługi',            type: 'services' }
   ],
   stepProducts: {}, // Cache of products per step
   compatibility: { messages: [], isValid: true }
 };
+
+const CART_ARRAY_KEYS = ['disk', 'monitor', 'mousepad', 'speakers', 'webcam', 'microphone', 'monitor_mount', 'case_fan', 'accessories', 'services'];
+
+function emptyCart() {
+  return {
+    cpu: null, mb: null, cooler: null, ram: null, disk: [], gpu: null, psu: null, casePc: null, os: null,
+    keyboard: null, mouse: null, headset: null,
+    monitor: [], mousepad: [], speakers: [], webcam: [], microphone: [], monitor_mount: [], case_fan: [],
+    accessories: [], services: []
+  };
+}
 
 // Extends renderOferter
 function initConfiguratorTab() {
@@ -777,29 +788,7 @@ function initConfiguratorTab() {
     delete ConfigState._loadedClientEmail;
     delete ConfigState._loadedNotesClient;
     delete ConfigState._loadedNotesInternal;
-    ConfigState.cart = {
-      cpu: null,
-      mb: null,
-      cooler: null,
-      ram: null,
-      disk: [],
-      gpu: null,
-      psu: null,
-      casePc: null,
-      os: null,
-      keyboard: null,
-      mouse: null,
-      headset: null,
-      monitor: [],
-      mousepad: [],
-      speakers: [],
-      webcam: [],
-      microphone: [],
-      monitor_mount: [],
-      case_fan: [],
-      accessories: [],
-      services: []
-    };
+    ConfigState.cart = emptyCart();
     ConfigState.preferences = {
       purpose: 'gaming',
       budget: 5000,
@@ -856,9 +845,10 @@ function updateBudget() {
 
 async function checkCompatibility() {
   const ids = [];
-  Object.values(ConfigState.cart).forEach(item => {
-    if (Array.isArray(item)) item.forEach(i => i && ids.push(i.id));
-    else if (item) ids.push(item.id);
+  Object.entries(ConfigState.cart).forEach(([key, item]) => {
+    if (key === 'services') return;
+    if (Array.isArray(item)) item.forEach(i => i && i.id && ids.push(i.id));
+    else if (item && item.id) ids.push(item.id);
   });
 
   if (ids.length === 0) {
@@ -1049,7 +1039,7 @@ async function loadStepContent() {
       const scoreCat = (c) => scoreStepCategory(c, step);
       const matched = cats.filter(c => scoreCat(c) > 0).sort((a, b) => scoreCat(b) - scoreCat(a));
       categoryIds = matched.map(c => c.id);
-      if (step.key === 'cooler') {
+      if (step.key === 'cooler' || step.key === 'ram' || step.key === 'os') {
         const specific = matched.filter(c => scoreCat(c) >= 5);
         if (specific.length) categoryIds = specific.map(c => c.id);
       }
@@ -1475,7 +1465,7 @@ const ATTR_NAME_GROUPS = [
   ['tdp', 'max tdp', 'moc cieplna'],
   ['wysokosc', 'height', 'hohe'],
   ['typ chlodzenia', 'cooler type', 'cooling type'],
-  ['typ pamieci ram', 'memory type', 'ram type', 'typ'],
+  ['typ pamieci ram', 'memory type', 'ram type'],
   ['format plyty', 'format'],
   ['liczba kosci', 'liczba kości'],
   ['dlugosc karty', 'długość karty'],
@@ -1495,6 +1485,7 @@ function containsCatToken(haystack, needle) {
   const n = foldCatName(needle);
   if (!h || !n) return false;
   if (h === n) return true;
+  if (n.length < 4) return false;
   if (n.length >= 6 && h.includes(n)) return true;
   const re = new RegExp('(?:^|[^a-z0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:$|[^a-z0-9])');
   return re.test(h);
@@ -1504,12 +1495,12 @@ function scoreStepCategory(cat, step) {
   const n = foldCatName(cat.name);
   const excludes = step.catExclude || [];
   if (excludes.some(ex => n.includes(foldCatName(ex)))) return 0;
-  if ((step.categoryIds || []).includes(cat.id)) return 10;
+  // Hardcoded ShopGold IDs are a weak hint — nazwa kategorii wygrywa, bo ID w katalogu Master się rozjeżdżają.
+  let best = (step.categoryIds || []).includes(cat.id) ? 4 : 0;
   const aliases = [
     ...(Array.isArray(step.catAlias) ? step.catAlias : step.catAlias ? [step.catAlias] : []),
     step.catName,
   ].filter(Boolean);
-  let best = 0;
   for (const a of aliases) {
     const fa = foldCatName(a);
     if (!fa) continue;
@@ -1721,13 +1712,13 @@ window.updateServicePrice = function(id, val) {
 // ─── ACCESSORIES STEP ─────────────────────────────────────────────────────────
 const ACC_TABS = [
   { key: 'keyboard',    label: '⌨️ Klawiatura',       icon: '⌨️', type: 'single', categoryIds: [3720, 3849], aliases: ['klawiatur'] },
-  { key: 'mouse',       label: '🖱️ Myszka',           icon: '🖱️', type: 'single', categoryIds: [3821, 4516, 4614], aliases: ['myszy bezprzewodowe', 'myszy przewodowe', 'myszy komputerowe'] },
-  { key: 'headset',     label: '🎧 Słuchawki',         icon: '🎧', type: 'single', categoryIds: [3953, 3904, 5377, 5608], aliases: ['sluchawki', 'headsets consumer', 'headsets business'] },
-  { key: 'monitor',     label: '🖥️ Monitory',         icon: '🖥️', type: 'multi',  categoryIds: [3700], aliases: ['monitory'] },
-  { key: 'mousepad',    label: '🟫 Podkładki',         icon: '🟫', type: 'multi',  categoryIds: [4136, 3848, 4153, 3721, 5166], aliases: ['podkladki pod myszki', 'podkladki do myszek', 'myszy i podkladki', 'myszypads'] },
-  { key: 'speakers',    label: '🔊 Głośniki',          icon: '🔊', type: 'multi',  categoryIds: [4741, 4170, 5388, 4283], aliases: ['glosniki bezprzewodowe', 'glosniki soundbar', 'glosniki przenosne'] },
+  { key: 'mouse',       label: '🖱️ Myszka',           icon: '🖱️', type: 'single', categoryIds: [3821, 4516, 4614], aliases: ['myszy bezprzewodowe', 'myszy przewodowe', 'myszy komputerowe'], exclude: ['podklad'] },
+  { key: 'headset',     label: '🎧 Słuchawki',         icon: '🎧', type: 'single', categoryIds: [3953, 3904, 5377, 5608], aliases: ['sluchawki', 'headset', 'headsets consumer', 'headsets business'], exclude: ['mikrofon studyj'] },
+  { key: 'monitor',     label: '🖥️ Monitory',         icon: '🖥️', type: 'multi',  categoryIds: [3700], aliases: ['monitory'], exclude: ['uchwyt', 'ramion'] },
+  { key: 'mousepad',    label: '🟫 Podkładki',         icon: '🟫', type: 'multi',  categoryIds: [4136, 3848, 4153, 3721, 5166], aliases: ['podkladki pod myszki', 'podkladki do myszek', 'podkladka pod mysz', 'mousepad', 'mouse pad'], exclude: ['myszy bezprzewod', 'myszy przewod', 'myszy komputer'] },
+  { key: 'speakers',    label: '🔊 Głośniki',          icon: '🔊', type: 'multi',  categoryIds: [4741, 4170, 5388, 4283], aliases: ['glosniki bezprzewodowe', 'glosniki soundbar', 'glosniki przenosne', 'glosniki'] },
   { key: 'webcam',      label: '📷 Kamery',            icon: '📷', type: 'multi',  categoryIds: [3963, 3897, 3725], aliases: ['kamery internetowe', 'webcams', 'pc- & netzwerkkameras'] },
-  { key: 'microphone',  label: '🎙️ Mikrofony',        icon: '🎙️', type: 'multi',  categoryIds: [5390, 3883], aliases: ['mikrofony', 'sluchawki z mikrofonem'] },
+  { key: 'microphone',  label: '🎙️ Mikrofony',        icon: '🎙️', type: 'multi',  categoryIds: [5390, 3883], aliases: ['mikrofony', 'microphone'], exclude: ['sluchawk', 'headset'] },
   { key: 'monitor_mount', label: '🦾 Uchwyty',         icon: '🦾', type: 'multi',  categoryIds: [4422, 4665, 4160], aliases: ['uchwyty do monitorow', 'uchwyty i ramiona do monitorow', 'akcesoria do montazu monitorow', 'ramiona do monitorow'] },
   { key: 'case_fan',    label: '💨 Wentylatory',       icon: '💨', type: 'multi',  categoryIds: [4144, 4588], aliases: ['wentylatory do obudow', 'wentylator do obudow', 'wentylatory do obudów i vga'], exclude: ['procesor', 'cpu cooler', 'chlodzenie wodne'] },
 ];
@@ -1741,15 +1732,6 @@ async function loadAccessoriesForStep(activeTabKey) {
   ConfigState._accActiveTab = activeTabKey;
   const tab = ACC_TABS.find(t => t.key === activeTabKey) || ACC_TABS[0];
 
-  // Helper: normalize Polish diacritics
-  const normPL = s => (s||'').toLowerCase()
-    .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
-    .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
-    .replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z');
-
-  // Normalize aliases too (they may contain Polish chars)
-  const normAliases = tab.aliases.map(a => normPL(a));
-
   // Resolve ALL matching categories (multiple per tab)
   let matchedCats = [];
   let products = [];
@@ -1758,11 +1740,9 @@ async function loadAccessoriesForStep(activeTabKey) {
     const catsData = await API.get('/oferter/setup/categories');
     const cats = catsData.categories || [];
     matchedCats = cats.filter(cat => {
-      const n = normPL(cat.name);
-      if ((tab.exclude || []).some(ex => n.includes(normPL(ex)))) return false;
-      const byId = (tab.categoryIds || []).includes(cat.id);
-      const byAlias = normAliases.some(a => a && (n === a || (a.length >= 6 && n.includes(a))));
-      return byId || byAlias;
+      if ((tab.exclude || []).some(ex => containsCatToken(cat.name, ex) || foldCatName(cat.name).includes(foldCatName(ex)))) return false;
+      const byAlias = (tab.aliases || []).some(a => containsCatToken(cat.name, a));
+      return byAlias;
     });
     console.log(`[ACC] Tab "${tab.key}" matched ${matchedCats.length} categories:`, matchedCats.map(c=>c.name));
 
@@ -2297,29 +2277,7 @@ async function saveQuote() {
       delete ConfigState._loadedNotesClient;
       delete ConfigState._loadedNotesInternal;
       
-      ConfigState.cart = {
-        cpu: null,
-        mb: null,
-        cooler: null,
-        ram: null,
-        disk: [],
-        gpu: null,
-        psu: null,
-        casePc: null,
-        os: null,
-        keyboard: null,
-        mouse: null,
-        headset: null,
-        monitor: [],
-        mousepad: [],
-        speakers: [],
-        webcam: [],
-        microphone: [],
-        monitor_mount: [],
-        case_fan: [],
-        accessories: [],
-        services: []
-      };
+      ConfigState.cart = emptyCart();
       ConfigState.preferences = {
         purpose: 'gaming',
         budget: 5000,
@@ -2511,19 +2469,7 @@ async function editQuote(id) {
     
     const q = res.offer;
     
-    // Clear and reset ConfigState cart
-    ConfigState.cart = {
-      cpu: null,
-      mb: null,
-      cooler: null,
-      ram: null,
-      disk: [],
-      gpu: null,
-      psu: null,
-      casePc: null,
-      os: null,
-      services: []
-    };
+    ConfigState.cart = emptyCart();
     
     // Parse components and services from JSON
     const comps = JSON.parse(q.components || '[]');
@@ -2543,15 +2489,14 @@ async function editQuote(id) {
       discountValue: prefs.discountValue ?? (q.discount_value != null ? q.discount_value : 0)
     };
     
-    // Distribute components to their respective cart slots based on _step
     comps.forEach(c => {
       const stepKey = c._step;
-      if (stepKey) {
-        if (stepKey === 'disk') {
-          ConfigState.cart.disk.push(c);
-        } else if (ConfigState.cart[stepKey] !== undefined) {
-          ConfigState.cart[stepKey] = c;
-        }
+      if (!stepKey) return;
+      if (CART_ARRAY_KEYS.includes(stepKey)) {
+        if (!Array.isArray(ConfigState.cart[stepKey])) ConfigState.cart[stepKey] = [];
+        ConfigState.cart[stepKey].push(c);
+      } else if (Object.prototype.hasOwnProperty.call(ConfigState.cart, stepKey)) {
+        ConfigState.cart[stepKey] = c;
       }
     });
     

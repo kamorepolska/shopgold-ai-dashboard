@@ -665,14 +665,49 @@ router.post('/compatibility', (req, res) => {
     // Helper function
     const norm = (s) => (s||'').toString().toLowerCase().trim();
 
+    const compactToken = (s) => attrSync.fold(s).replace(/[\s\-_]/g, '');
+    const socketsCompatible = (haystack, needle) => {
+      const cpuN = compactToken(needle);
+      if (!cpuN) return true;
+      const parts = String(haystack || '').split(/[,;/|+]| i /i).map(compactToken).filter(Boolean);
+      const pool = parts.length ? parts : [compactToken(haystack)].filter(Boolean);
+      return pool.some(p => p === cpuN || p.includes(cpuN) || cpuN.includes(p));
+    };
+    const ramTypesCompatible = (mbType, ramType) => {
+      const a = compactToken(mbType);
+      const b = compactToken(ramType);
+      if (!a || !b) return true;
+      const gen = (s) => (s.match(/ddr[0-9]/) || [null])[0];
+      const ga = gen(a), gb = gen(b);
+      if (ga && gb) return ga === gb;
+      return a.includes(b) || b.includes(a);
+    };
+    const FORM_RANK = [
+      ['eeatx', 6], ['extendedatx', 6], ['eatx', 6],
+      ['microatx', 3], ['matx', 3],
+      ['miniitx', 2], ['itx', 2],
+      ['ministx', 1],
+      ['atx', 4],
+    ];
+    const formRank = (s) => {
+      const n = compactToken(s);
+      let best = null;
+      for (const [k, v] of FORM_RANK) {
+        if (n.includes(k) && (!best || k.length > best.key.length)) best = { key: k, v };
+      }
+      return best ? best.v : null;
+    };
+
     const pickComp = (...keys) => {
       const folded = keys.map(k => attrSync.fold(k));
+      const lookingRam = folded.some(k => k.includes('pamiec') || k === 'ram' || k.includes('dimm'));
       const specific = folded.filter(k => k.length >= 8);
       const generic = folded.filter(k => k.length < 8);
       let best = null, bestScore = 0;
       for (const [name, attrs] of Object.entries(compMap)) {
         const n = attrSync.fold(name);
         if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
+        if (lookingRam && /masow|flash|pendrive|czytnik/.test(n)) continue;
         let score = 0;
         if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
         else if (generic.some(k => n.includes(k))) score = 1;
@@ -696,18 +731,18 @@ router.post('/compatibility', (req, res) => {
     if (cpu && mb) {
       const cpuSock = attrOf(cpu, 'Socket');
       const mbSock = attrOf(mb, 'Socket');
-      if (norm(cpuSock) && norm(mbSock) && norm(cpuSock) !== norm(mbSock)) {
+      if (cpuSock && mbSock && compactToken(cpuSock) && compactToken(mbSock) && compactToken(cpuSock) !== compactToken(mbSock)) {
         isValid = false;
         messages.push({ type: 'error', text: `Niezgodny Socket! Procesor wymaga ${cpuSock}, a wybrana płyta posiada ${mbSock}.` });
       }
     }
 
     // 2. RAM <-> Plyta
-    const ram = pickComp('pamiec', 'ram', 'dimm');
+    const ram = pickComp('pamiec ram', 'pamieci ram', 'moduly ram', 'dimm', 'so-dimm');
     if (mb && ram) {
       const mbType = attrOf(mb, 'Typ pamięci RAM', 'Typ');
       const ramType = attrOf(ram, 'Typ', 'Typ pamięci RAM');
-      if (norm(mbType) && norm(ramType) && !norm(mbType).includes(norm(ramType)) && !norm(ramType).includes(norm(mbType))) {
+      if (mbType && ramType && !ramTypesCompatible(mbType, ramType)) {
          isValid = false;
          messages.push({ type: 'error', text: `Niezgodny typ pamięci! Płyta obsługuje ${mbType}, wybrano pamięć ${ramType}.` });
       }
@@ -729,7 +764,7 @@ router.post('/compatibility', (req, res) => {
       }
       const coolerSock = attrOf(cooler, 'Kompatybilne sockety', 'Socket');
       const cpuSock = attrOf(cpu, 'Socket');
-      if (coolerSock && cpuSock && !norm(coolerSock).includes(norm(cpuSock))) {
+      if (coolerSock && cpuSock && !socketsCompatible(coolerSock, cpuSock)) {
          isValid = false;
          messages.push({ type: 'error', text: `Chłodzenie nie pasuje do gniazda procesora (${cpuSock}).` });
       }
@@ -740,7 +775,9 @@ router.post('/compatibility', (req, res) => {
     if (mb && casePc) {
       const caseFmt = attrOf(casePc, 'Format płyty', 'Format');
       const mbFmt = attrOf(mb, 'Format', 'Format płyty');
-      if (caseFmt && mbFmt && !norm(caseFmt).includes(norm(mbFmt)) && !norm(mbFmt).includes(norm(caseFmt))) {
+      const caseRank = formRank(caseFmt);
+      const mbRank = formRank(mbFmt);
+      if (caseRank != null && mbRank != null && mbRank > caseRank) {
         isValid = false;
         messages.push({ type: 'error', text: `Płyta główna (${mbFmt}) nie zmieści się w obudowie (wspiera ${caseFmt}).` });
       }
@@ -812,8 +849,15 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
        LIMIT 1) AS description
     FROM catalog_master cm
     WHERE cm.category_id = ?
-      AND cm.id NOT IN (SELECT catalog_id FROM product_attributes)
-  `).all(catId);
+      AND (
+        SELECT COUNT(*) FROM category_attributes ca WHERE ca.category_id = ?
+      ) > (
+        SELECT COUNT(DISTINCT pa.attribute_id)
+        FROM product_attributes pa
+        JOIN category_attributes ca ON ca.id = pa.attribute_id AND ca.category_id = ?
+        WHERE pa.catalog_id = cm.id
+      )
+  `).all(catId, catId, catId);
 
   batchStatus[catId] = { running: true, total: products.length, done: 0 };
   res.json({ ok: true, message: `Uruchomiono zadanie w tle. Do pobrania: ${products.length} produktów.` });

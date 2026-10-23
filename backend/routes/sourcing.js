@@ -438,8 +438,9 @@ router.post('/suppliers/:id/elko-brand-file', (req, res, next) => upload.single(
       // Refresh this brand's data
       const { products } = await svc.refreshOneSupplierFile(existing.id);
       // Re-run full supplier refresh to merge all brands
-      try { await svc.refreshSupplier(supplier_id); } catch(_) {}
-      return res.json({ success: true, id: existing.id, replaced: true, imported: products.length });
+      let warning = null;
+      try { await svc.refreshSupplier(supplier_id); } catch (e) { warning = e.message; console.warn('[sourcing] Elko merge after brand file:', e.message); }
+      return res.json({ success: true, id: existing.id, replaced: true, imported: products.length, warning });
     }
 
     // New brand file
@@ -452,8 +453,9 @@ router.post('/suppliers/:id/elko-brand-file', (req, res, next) => upload.single(
     });
     // Parse and merge
     const { products } = await svc.refreshOneSupplierFile(sfId);
-    try { await svc.refreshSupplier(supplier_id); } catch(_) {}
-    res.json({ success: true, id: sfId, replaced: false, imported: products.length });
+    let warning = null;
+    try { await svc.refreshSupplier(supplier_id); } catch (e) { warning = e.message; console.warn('[sourcing] Elko merge after brand file:', e.message); }
+    res.json({ success: true, id: sfId, replaced: false, imported: products.length, warning });
   } catch(e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -732,13 +734,15 @@ router.post('/suppliers/:id/files/:fid/refresh', (req, res, next) => upload.sing
     }
     const { products } = await svc.refreshOneSupplierFile(fid);
     let imported = products.length;
+    let warning = null;
     try {
       const merged = await svc.refreshSupplier(parseInt(req.params.id));
       imported = merged.imported;
     } catch (e) {
+      warning = e.message;
       console.warn('[sourcing] catalog rebuild after extra file:', e.message);
     }
-    res.json({ success: true, imported });
+    res.json({ success: true, imported, warning });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1052,7 +1056,8 @@ router.get('/promotions/export', (req, res) => {
     const threshold     = req.query.threshold ? parseFloat(req.query.threshold) : 10;
     const onlyAvailable = req.query.onlyAvailable === 'true';
     const search        = req.query.search || '';
-    const rows = svc.buildPromotions({ threshold, onlyAvailable, search });
+    const data = svc.buildPromotions({ threshold, onlyAvailable, search });
+    const rows = Array.isArray(data) ? data : (data.rows || []);
     const header = 'EAN;Nazwa;Super cena;Hurtownia;Cena ref.;Odnosnik;Oszcz. %;Dostepnosc;W Subiekcie;Stan;Cena sprzedazy';
     const lines = [header, ...rows.map(r => [
       r.ean, `"${(r.name||'').replace(/"/g,'""')}"`,
@@ -1067,6 +1072,7 @@ router.get('/promotions/export', (req, res) => {
     const fn = `promocje_${new Date().toISOString().slice(0,10)}.csv`;
     res.setHeader('Content-Type','text/csv; charset=utf-8');
     res.setHeader('Content-Disposition',`attachment; filename="${fn}"`);
+    res.send('\uFEFF' + lines.join('\r\n'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2090,37 +2096,65 @@ router.get('/catalog/product/:idOrEan', (req, res) => {
     const idOrEan = req.params.idOrEan;
     const db = svc.getDb();
     
-    // Zawsze sprawdzamy najpierw czy to jest EAN w catalog_master
     let row = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ?').get(idOrEan);
     let productId = row ? row.id : null;
-    
-    // Jeśli nie ma EAN, sprawdzamy czy to poprawne ID (liczbowe)
+
+    if (!productId) {
+      try {
+        const n = catalogSvc.normalizeEan(idOrEan);
+        if (n) {
+          row = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ? OR normalize_ean(canonical_ean) = ? LIMIT 1').get(n, n);
+          if (row) productId = row.id;
+        }
+      } catch (_) {}
+    }
+
     if (!productId && /^\d+$/.test(idOrEan)) {
         const byId = db.prepare('SELECT id FROM catalog_master WHERE id = ?').get(parseInt(idOrEan, 10));
         if (byId) productId = byId.id;
     }
-    
-    // Jeśli nadal brak i przekazano EAN (nie krótkie ID), dodajemy go automatycznie do catalog_master
+
     if (!productId && !/^\d{1,7}$/.test(idOrEan)) {
-       let name = 'Nieznany produkt (' + idOrEan + ')';
+       let name = '';
        let mfg = '';
-       const supProd = db.prepare('SELECT name, manufacturer FROM supplier_products WHERE ean = ? AND name IS NOT NULL AND name != \'\' LIMIT 1').get(idOrEan);
+       const n = catalogSvc.normalizeEan(idOrEan) || idOrEan;
+       let supProd = db.prepare(
+         `SELECT name, manufacturer FROM supplier_products WHERE ean = ? AND name IS NOT NULL AND name != '' LIMIT 1`
+       ).get(idOrEan);
+       if (!supProd) {
+         try {
+           supProd = db.prepare(
+             `SELECT name, manufacturer FROM supplier_products
+              WHERE (normalized_ean = ? OR normalize_ean(ean) = ?) AND name IS NOT NULL AND name != ''
+              LIMIT 1`
+           ).get(n, n);
+         } catch (_) {}
+       }
        if (supProd) {
           name = supProd.name;
           mfg = supProd.manufacturer || '';
        } else {
-          const subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE ean = ? LIMIT 1').get(idOrEan);
+          let subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE ean = ? LIMIT 1').get(idOrEan);
+          if (!subProd) {
+            try {
+              subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE normalize_ean(ean) = ? LIMIT 1').get(n);
+            } catch (_) {}
+          }
           if (subProd) {
              name = subProd.name;
              mfg = subProd.manufacturer || '';
           }
        }
-       
-       try {
-          const ins = db.prepare('INSERT INTO catalog_master (canonical_ean, name, normalized_name, manufacturer) VALUES (?, ?, ?, ?)').run(idOrEan, name, name, mfg);
-          productId = ins.lastInsertRowid;
-       } catch(e) {
-          console.error('Auto-insert do catalog_master nie powiódł się', e);
+
+       if (name) {
+         try {
+            const ins = db.prepare('INSERT INTO catalog_master (canonical_ean, name, normalized_name, manufacturer) VALUES (?, ?, ?, ?)').run(n, name, name, mfg);
+            productId = ins.lastInsertRowid;
+         } catch(e) {
+            console.error('Auto-insert do catalog_master nie powiódł się', e);
+            const again = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ? OR normalize_ean(canonical_ean) = ? LIMIT 1').get(n, n);
+            if (again) productId = again.id;
+         }
        }
     }
     

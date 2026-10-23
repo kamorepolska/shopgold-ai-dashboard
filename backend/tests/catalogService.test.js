@@ -81,6 +81,59 @@ function testGenerateAssignsByNormalizedEan() {
   db.close();
 }
 
+function testGenerateDoesNotWipeParentId() {
+  const db = makeDb();
+  db.prepare('INSERT INTO suppliers (id, name) VALUES (1, ?)').run('Action');
+  db.prepare(`INSERT INTO product_categories (id, name, slug, parent_id, is_ab_category) VALUES (1, 'Komponenty', 'komponenty', NULL, 1)`).run();
+  db.prepare(`INSERT INTO product_categories (id, name, slug, parent_id, is_ab_category) VALUES (2, 'Inna galaz', 'inna', 1, 0)`).run();
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, category)
+    VALUES (1, '5901234123457', '5901234123457', 'AMD Ryzen', 'Komponenty > Procesory')
+  `).run();
+  catalogSvc.generateAbCategoryTree(db);
+  const row = db.prepare('SELECT parent_id FROM product_categories WHERE id = 2').get();
+  assert.strictEqual(row.parent_id, 1, 'non-AB parent_id must survive tree rebuild');
+  db.close();
+}
+
+function testGenerateDoesNotMergeSiblingCategories() {
+  const db = makeDb();
+  db.prepare('INSERT INTO suppliers (id, name) VALUES (1, ?)').run('Action');
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, category)
+    VALUES (1, '5901234123457', '5901234123457', 'AMD', 'Komponenty > Procesory')
+  `).run();
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, category)
+    VALUES (1, '5901234123458', '5901234123458', 'Intel', 'Komponenty > Procesory Intel')
+  `).run();
+  catalogSvc.generateAbCategoryTree(db);
+  const names = db.prepare("SELECT name FROM product_categories WHERE name LIKE 'Procesor%' ORDER BY name").all().map(r => r.name);
+  assert.ok(names.includes('Procesory'), names.join(','));
+  assert.ok(names.includes('Procesory Intel'), names.join(','));
+  db.close();
+}
+
+function testSearchCatalogTreatsNullConditionAsNew() {
+  const db = makeDb();
+  db.exec(`ALTER TABLE supplier_products ADD COLUMN availability TEXT`);
+  db.prepare('INSERT INTO suppliers (id, name) VALUES (1, ?)').run('Action');
+  db.prepare(`
+    INSERT INTO catalog_master (canonical_ean, name, category_id, category_name)
+    VALUES ('5901234123457', 'Ryzen', NULL, NULL)
+  `).run();
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, price_pln, stock_quantity, condition, availability)
+    VALUES (1, '5901234123457', '5901234123457', 'AMD Ryzen', 100, 5, NULL, 'available')
+  `).run();
+  const result = catalogSvc.searchCatalog(db, { condition: 'new', availability: 'available' });
+  assert.ok((result.rows || result.items || []).length >= 1 || result.total >= 1, 'NULL condition must still match default new filter');
+  db.close();
+}
+
 testGenerateDoesNotWipeExistingCategory();
 testGenerateAssignsByNormalizedEan();
+testGenerateDoesNotWipeParentId();
+testGenerateDoesNotMergeSiblingCategories();
+testSearchCatalogTreatsNullConditionAsNew();
 console.log('catalogService tests: ok');

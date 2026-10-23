@@ -852,11 +852,9 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           progBar.textContent = '⏳ Łączenie z Action API...';
 
           try {
-            const token = localStorage.getItem('sg_token') || '';
-            const company = localStorage.getItem('sg_company') || '';
             const response = await fetch(`/api/sourcing/suppliers/${id}/refresh`, {
               method: 'POST',
-              headers: { 'X-User-Token': token, 'X-Company-Id': company }
+              headers: API._headers()
             });
             if (!response.ok) throw new Error('HTTP ' + response.status);
 
@@ -879,6 +877,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
                   } else if (ev.status === 'done') {
                     progBar.textContent = '✅ Zsynchronizowano ' + (ev.imported || 0) + ' SKU';
                     Toast.success(`✅ Action API: wczytano ${ev.imported || 0} SKU`);
+                    clearTabCache();
                     setTimeout(() => { progBar.remove(); renderSuppliers(); }, 3000);
                   } else if (ev.status === 'error') {
                     throw new Error(ev.error || 'Nieznany błąd');
@@ -910,6 +909,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
             ? await API.upload(`/sourcing/suppliers/${id}/refresh`, fd)
             : await API.post(`/sourcing/suppliers/${id}/refresh`, {});
           Toast.success(`✅ Wczytano ${r.imported} SKU`);
+          clearTabCache();
           renderSuppliers();
         } catch(e) { Toast.error(e.message); btn.innerHTML='🔄 Odswież'; btn.disabled=false; }
       });
@@ -928,6 +928,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           const fd = new FormData(); fd.append('file', inp.files[0]);
           const r = await API.upload(`/sourcing/suppliers/${id}/replace-file`, fd);
           Toast.success(`✅ Plik zastapiony — wczytano ${r.imported} SKU`);
+          clearTabCache();
           renderSuppliers();
         } catch(e) { Toast.error(e.message); btn.disabled=false; btn.textContent='📂 Zastąp plik'; }
       });
@@ -1045,7 +1046,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     document.querySelectorAll('.btn-analyze-supplier').forEach(btn => {
       btn.addEventListener('click', () => {
         Toast.success('Analiza uruchomiona. Trwa pobieranie kolumn...');
-        setTimeout(() => _openMappingModal(btn.dataset.id, btn.dataset.name), 500);
+        setTimeout(() => showSupplierMappingModal(btn.dataset.id, btn.dataset.name), 500);
       });
     });
 
@@ -2123,7 +2124,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     document.getElementById('sched-now-btn').addEventListener('click', async () => {
       const b = document.getElementById('sched-now-btn');
       b.disabled=true; b.textContent='⏳...';
-      try { const r = await API.post(`/sourcing/suppliers/${id}/refresh`,{}); Toast.success(`✅ ${r.imported} SKU`); }
+      try { const r = await API.post(`/sourcing/suppliers/${id}/refresh`,{}); Toast.success(`✅ ${r.imported} SKU`); clearTabCache(); }
       catch(e) { Toast.error(e.message); }
       b.disabled=false; b.textContent='🔄 Odśwież teraz';
     });
@@ -2316,28 +2317,31 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           const name = btn.dataset.name;
           const cronVal = btn.dataset.cron;
           const enabled = btn.dataset.enabled === '1';
-          
-          Modal.show({
-            title: `⏰ Harmonogram pliku: ${escHtml(name)}`,
-            body: `<div style="display:flex;flex-direction:column;gap:12px">
-              <label style="display:flex;align-items:center;gap:8px">
+          let panel = document.getElementById('sf-sched-panel');
+          if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'sf-sched-panel';
+            el.prepend(panel);
+          }
+          panel.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated)">
+              <div style="font-weight:600;font-size:.85rem">⏰ Harmonogram: ${escHtml(name)}</div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:.82rem">
                 <input type="checkbox" id="sf-sched-enabled"${enabled?' checked':''}>
                 Włącz automatyczne pobieranie tego pliku
               </label>
-              <div class="form-group">
+              <div class="form-group" style="margin:0">
                 <label class="form-label">Wyrażenie CRON (np. <code>0 * * * *</code> = co godzinę)</label>
                 <input class="form-input" id="sf-sched-cron" value="${escHtml(cronVal||'0 * * * *')}">
                 <div style="font-size:.7rem;color:var(--text-muted);margin-top:4px">
-                  0 * * * * = co pełną godzinę<br>
-                  */15 * * * * = co 15 minut<br>
-                  0 2 * * * = codziennie o 2:00
+                  0 * * * * = co pełną godzinę · */15 * * * * = co 15 minut · 0 2 * * * = codziennie o 2:00
                 </div>
               </div>
-            </div>`,
-            footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Anuluj</button>
-                     <button class="btn btn--primary" id="sf-sched-save-btn">Zapisz</button>`
-          });
-          
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn btn--secondary btn--sm" id="sf-sched-cancel-btn">Anuluj</button>
+                <button class="btn btn--primary btn--sm" id="sf-sched-save-btn">Zapisz</button>
+              </div>
+            </div>`;
+          document.getElementById('sf-sched-cancel-btn').onclick = () => panel.remove();
           document.getElementById('sf-sched-save-btn').onclick = async () => {
             const btnSave = document.getElementById('sf-sched-save-btn');
             btnSave.disabled = true; btnSave.textContent = 'Zapisywanie...';
@@ -2348,8 +2352,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
               };
               await API.patch(`/sourcing/suppliers/${supplierId}/files/${fid}/schedule`, payload);
               Toast.success('Zapisano harmonogram pliku');
-              Modal.hide();
-              renderFilesModalBody(supplierId);
+              await renderFilesModalBody(supplierId);
             } catch(e) {
               Toast.error(e.message);
               btnSave.disabled = false; btnSave.textContent = 'Zapisz';
@@ -2688,7 +2691,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     <label>Oszczędność ≥</label>
     <select id="cmp-savings" class="form-input">
       <option value="">Wszystkie</option>
-      ${[5,10,15,20,30].map(v=>`<option value="${v}"${filterSavings===v?' selected':''}>${v}%</option>`).join('')}
+      ${[5,10,15,20,30].map(v=>`<option value="${v}"${String(filterSavings)===String(v)?' selected':''}>${v}%</option>`).join('')}
     </select>
   </div>
   <div class="toolbar-group" style="margin-left:auto;gap:4px">
@@ -4947,6 +4950,8 @@ ${refNote}
   }).join('')}
 </div>` : '';
 
+    const sigMap = {green:'🟢',yellow:'🟡',red:'🔴',none:'—'};
+    const sigTitle = {green:'Opłacalne (Kup taniej)',yellow:'Neutralne (Podobna cena)',red:'Drożej (Nie opłaca się)',none:'Brak analizy'};
     document.getElementById('prod-modal-body').innerHTML = `
 <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
   <div style="flex-shrink:0">${imgHtml}</div>
@@ -5475,6 +5480,31 @@ ${offersHtml}`;
   let catTreeSearchVal = '';         // tree search query
   let _catLastRender = null;         // { html, ts } — cached last rendered HTML for instant tab revisit
 
+  function _syncActiveCatId(id) {
+    if (id === '' || id == null) {
+      catSelectedCategoryId = null;
+      window.catCategoryId = null;
+      catSelectedIsUnmapped = false;
+    } else if (id === 'unmapped') {
+      catSelectedCategoryId = 'unmapped';
+      window.catCategoryId = 'unmapped';
+      catSelectedIsUnmapped = true;
+    } else {
+      catSelectedCategoryId = id;
+      window.catCategoryId = id;
+      catSelectedIsUnmapped = false;
+    }
+    return catSelectedCategoryId;
+  }
+
+  function _activeCatId() {
+    const raw = (catSelectedCategoryId != null && catSelectedCategoryId !== '')
+      ? catSelectedCategoryId
+      : (window.catCategoryId || '');
+    if (raw === 'unmapped') return 'unmapped';
+    return raw || '';
+  }
+
   /* ── Fast partial refresh: only updates products table, keeps sidebar ── */
   async function _refreshCatalogProducts() {
     const area = document.getElementById('cat-products-area');
@@ -5486,7 +5516,7 @@ ${offersHtml}`;
       tbody.innerHTML = Array(10).fill(`<tr>${Array(7).fill('<td><div class="sk-cell" style="height:12px;border-radius:3px"></div></td>').join('')}</tr>`).join('');
     }
 
-    const activeCatId = catSelectedCategoryId || window.catCategoryId || '';
+    const activeCatId = _activeCatId();
     let catUrl = `/sourcing/catalog?page=${catPage}&limit=${catLimit}&search=${encodeURIComponent(catSearch)}&manufacturer=${encodeURIComponent(catMfg)}&manufacturerSearch=${encodeURIComponent(catMfgSearch)}&categoryId=${activeCatId}&sort=${catSort}&order=${catOrder}&inSubiekt=${catInSubiekt}&condition=${encodeURIComponent(catCondition)}&availability=${encodeURIComponent(catAvail)}`;
     if (catSelectedSuppliers.length > 0) catUrl += `&supplierIds=${encodeURIComponent(JSON.stringify(catSelectedSuppliers))}`;
     else if (catSupplier) catUrl += `&supplier=${encodeURIComponent(catSupplier)}`;
@@ -5546,8 +5576,7 @@ ${offersHtml}`;
     let stats = {}, data = {}, manufacturers = [], categories = [];
     try {
       // Build query with multi-supplier and attr filters
-      // Use catSelectedCategoryId for tree-based filtering (overrides old catCategoryId)
-      const activeCatId = catSelectedCategoryId || window.catCategoryId || '';
+      const activeCatId = _activeCatId();
       let catUrl = `/sourcing/catalog?page=${catPage}&limit=${catLimit}&search=${encodeURIComponent(catSearch)}&manufacturer=${encodeURIComponent(catMfg)}&manufacturerSearch=${encodeURIComponent(catMfgSearch)}&categoryId=${activeCatId}&sort=${catSort}&order=${catOrder}&inSubiekt=${catInSubiekt}&condition=${encodeURIComponent(catCondition)}&availability=${encodeURIComponent(catAvail)}`;
       if (catSelectedSuppliers.length > 0) {
         catUrl += `&supplierIds=${encodeURIComponent(JSON.stringify(catSelectedSuppliers))}`;
@@ -5582,8 +5611,7 @@ ${offersHtml}`;
       const needTree = !catTreeData;
       if (needTree) fetchPromises.push(API.get('/sourcing/catalog/category-tree').catch(() => null));
 
-      // Also fetch attributes + filters in parallel if a category is selected
-      const catIdForAttrs = window.catCategoryId;
+      const catIdForAttrs = (activeCatId && activeCatId !== 'unmapped') ? activeCatId : '';
       if (catIdForAttrs) {
         fetchPromises.push(API.get(`/sourcing/catalog/categories/${catIdForAttrs}/attributes`).catch(() => []));
         fetchPromises.push(API.get(`/sourcing/catalog/categories/${catIdForAttrs}/filters`).catch(() => []));
@@ -5599,7 +5627,12 @@ ${offersHtml}`;
       if (!cachedStats) setTabCache('cat:stats', stats);
       if (!cachedMfg) setTabCache('cat:mfg', manufacturers);
       if (!cachedCats) setTabCache('cat:cats', categories);
-      if (needTree) catTreeData = results[4];
+      if (needTree) {
+        catTreeData = results[4];
+        window.catTreeData = catTreeData;
+      } else {
+        window.catTreeData = catTreeData;
+      }
 
       // Extract pre-fetched attributes + filters
       var prefetchedAttrs = catIdForAttrs ? results[needTree ? 5 : 4] : null;
@@ -5833,7 +5866,11 @@ ${offersHtml}`;
         : '—';
       // Name display: normalized > original, with tooltip for originals
       const displayName = p.normalized_name || p.name || '—';
-      const origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+      let origNames = {};
+      try {
+        origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+        if (!origNames || typeof origNames !== 'object' || Array.isArray(origNames)) origNames = {};
+      } catch (_) { origNames = {}; }
       const origTooltip = Object.entries(origNames).map(([k,v]) => `[${k}]: ${v}`).join('\n');
       const nameLockedIcon = p.name_locked ? ' 🔒' : '';
       const nameHtml = p.normalized_name 
@@ -6050,7 +6087,7 @@ ${offersHtml}`;
         renderCatalog();
       });
     });
-    document.getElementById('cat-category')?.addEventListener('change', e => { window.catCategoryId = e.target.value; window._catCatSearchVal = ''; catPage = 1; catAttrFilters = {}; renderCatalog(); });
+    document.getElementById('cat-category')?.addEventListener('change', e => { _syncActiveCatId(e.target.value || null); window._catCatSearchVal = ''; catPage = 1; catAttrFilters = {}; renderCatalog(); });
     document.getElementById('cat-in-subiekt')?.addEventListener('change', e => { catInSubiekt = e.target.value; catPage = 1; renderCatalog(); });
     document.getElementById('cat-condition')?.addEventListener('change', e => { catCondition = e.target.value; catPage = 1; renderCatalog(); });
     document.getElementById('cat-avail')?.addEventListener('change', e => { catAvail = e.target.value; catPage = 1; renderCatalog(); });
@@ -6190,7 +6227,7 @@ ${offersHtml}`;
               item.addEventListener('click', () => {
                 const id = item.dataset.id;
                 const name = item.dataset.name;
-                window.catCategoryId = id;
+                _syncActiveCatId(id);
                 window._catCatSearchVal = name;
                 catCatSearchInput.value = name;
                 catSuggestBox.style.display = 'none';
@@ -6630,9 +6667,7 @@ ${subiektSectionC}
                 clearTabCache('cat:stats');
 
                 // Automatically select the new category ID so user sees it
-                catSelectedCategoryId = res.id;
-                catSelectedIsUnmapped = false;
-                window.catCategoryId = res.id;
+                _syncActiveCatId(res.id);
 
                 // Rerender catalog to load and show the new category tree
                 renderCatalog();
@@ -7649,23 +7684,13 @@ ${subiektSectionC}
         e.stopPropagation();
         const id = el.dataset.id ? parseInt(el.dataset.id) : null;
         if (el.classList.contains('cat-tree-unmapped')) {
-          catSelectedIsUnmapped = true;
-          catSelectedCategoryId = 'unmapped'; 
+          _syncActiveCatId('unmapped');
         } else if (id === 0) {
-          // "Wszystkie" clicked - reset filters
-          catSelectedIsUnmapped = false;
-          catSelectedCategoryId = null;
-          window.catCategoryId = null;
+          _syncActiveCatId(null);
+        } else if (catSelectedCategoryId === id) {
+          _syncActiveCatId(null);
         } else {
-          catSelectedIsUnmapped = false;
-          // Toggle off if already selected
-          if (catSelectedCategoryId === id) {
-            catSelectedCategoryId = null;
-            window.catCategoryId = null;
-          } else {
-            catSelectedCategoryId = id;
-            window.catCategoryId = id; // sync with old var
-          }
+          _syncActiveCatId(id);
         }
         catPage = 1;
         renderCatalog();
@@ -8203,6 +8228,7 @@ ${subiektSectionC}
       const detail = await API.get(`/sourcing/catalog/product/${productId}`);
       if (!detail || !detail.product) { Toast.error('Nie znaleziono produktu'); return; }
       const p = detail.product;
+      const catalogId = p.id;
       const attrs = detail.attributes || [];
       const prices = detail.prices || [];
       const sub = detail.subiekt;
@@ -8233,10 +8259,10 @@ ${subiektSectionC}
           <tbody>${attrs.map(a => `<tr>
             <td class="prod-attr-name">${escHtml(a.attr_name)}</td>
             <td class="prod-attr-value">
-              <input class="prod-attr-input" value="${escHtml(a.value_text||'')}" data-attr-id="${a.attr_id}" data-catalog-id="${productId}" placeholder="Ustaw wartość...">
+              <input class="prod-attr-input" value="${escHtml(a.value_text||'')}" data-attr-id="${a.attr_id}" data-catalog-id="${catalogId}" placeholder="Ustaw wartość...">
             </td>
             <td>${a.attr_unit ? `<span class="prod-attr-unit">${escHtml(a.attr_unit)}</span>` : '—'}</td>
-            <td><button class="prod-attr-save" onclick="SourcingView._saveAttrValue(${productId}, ${a.attr_id}, this)">💾</button></td>
+            <td><button class="prod-attr-save" onclick="SourcingView._saveAttrValue(${catalogId}, ${a.attr_id}, this)">💾</button></td>
           </tr>`).join('')}</tbody>
         </table>`;
       } else {
@@ -8291,7 +8317,11 @@ ${subiektSectionC}
       </table></div>` : '<div style="text-align:center;color:var(--text-muted);padding:12px;font-size:.82rem">Brak danych cenowych</div>';
 
       // Original names
-      const origNames = p.original_names || {};
+      let origNames = {};
+      try {
+        origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+        if (!origNames || typeof origNames !== 'object' || Array.isArray(origNames)) origNames = {};
+      } catch (_) { origNames = {}; }
       const origNamesHtml = Object.keys(origNames).length > 0 ? `<div style="max-height:120px;overflow-y:auto">
         ${Object.entries(origNames).map(([sup, name]) => `<div class="prod-info-row"><span class="prod-info-label" style="min-width:80px">${escHtml(sup)}:</span> <span style="font-size:.78rem;color:var(--text-secondary);word-break:break-all">${escHtml(name)}</span></div>`).join('')}
       </div>` : '<div style="color:var(--text-muted);font-size:.82rem">Brak danych</div>';
@@ -8426,7 +8456,7 @@ ${subiektSectionC}
       const res = await API.post(`/sourcing/catalog/product/${catalogId}/unify-attributes`);
       Toast.success(res.message || 'Cechy zostały pomyślnie zunifikowane!');
       // Odśwież widok szczegółów produktu
-      _showProductDetails(catalogId);
+      _showProductDetail(catalogId);
     } catch (e) {
       Toast.error('Błąd unifikacji: ' + e.message);
       btn.innerHTML = originalText;
@@ -8521,8 +8551,8 @@ ${subiektSectionC}
 
   function _catSelectAllSup(selectAll) {
     if (selectAll) {
-      const labels = document.querySelectorAll('#cat-supplier-panel .cat-supplier-cb');
-      catSelectedSuppliers = Array.from(labels).map(l => l.dataset.sup).filter(Boolean);
+      const boxes = document.querySelectorAll('.cat-multi-cb-sup');
+      catSelectedSuppliers = Array.from(boxes).map(cb => cb.value).filter(Boolean);
     } else {
       catSelectedSuppliers = [];
     }
