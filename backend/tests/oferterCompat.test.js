@@ -24,6 +24,7 @@ assert.strictEqual(mb.Socket, 'AM5');
 const diskCase = router.pickComponentAttrs({
   'Obudowy komputerowe': { Format: 'ATX' },
   'Obudowy na dyski HDD': { Format: '3.5' },
+  'Wentylatory do obudów': { Rozmiar: '120' },
 }, ['obudowy komputerowe', 'obudowy pc', 'gehause', 'obudow', 'case']);
 assert.ok(diskCase);
 assert.strictEqual(diskCase.Format, 'ATX');

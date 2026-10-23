@@ -78,7 +78,7 @@ function pickComponentAttrs(compMap, keys) {
     if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
     if (lookingRam && /masow|flash|pendrive|czytnik/.test(n)) continue;
     if (lookingMb && /dysk|hdd|ssd|nas/.test(n) && !/glown/.test(n)) continue;
-    if (lookingCase && /dysk|hdd|ssd|nas|zewnetrz/.test(n)) continue;
+    if (lookingCase && /dysk|hdd|ssd|nas|zewnetrz|wentylator|fan/.test(n)) continue;
     let score = 0;
     if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
     else if (generic.some(k => n.includes(k))) score = 1;

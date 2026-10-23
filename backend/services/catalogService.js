@@ -1519,6 +1519,8 @@ function getCategoryTree(db) {
            pc.parent_id, pc.is_ab_category, pc.sort_order
     FROM product_categories pc
     WHERE pc.is_ab_category = 1
+      AND lower(pc.name) NOT LIKE '%kazdy kategor%'
+      AND pc.name NOT GLOB '[0-9] *'
     ORDER BY COALESCE(pc.sort_order, 9999) ASC, pc.name ASC
   `).all();
 

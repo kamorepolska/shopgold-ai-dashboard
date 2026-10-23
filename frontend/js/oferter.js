@@ -561,7 +561,7 @@ const ConfigState = {
     { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne', 'dysk ssd', 'dysk hdd', 'nvme'], catExclude: ['obudow', 'kieszen', 'adapter'] },
     { id: 6,  key: 'gpu',         label: '6. Karta graficzna',    type: 'single', categoryIds: [3694, 3987], catName: null,        catAlias: ['karta graficzna', 'karty graficzne'] },
     { id: 7,  key: 'psu',         label: '7. Zasilacz',           type: 'single', categoryIds: [3758], catName: 'Zasilacze',              catAlias: ['zasilacz', 'zasilacze'] },
-    { id: 8,  key: 'casePc',      label: '8. Obudowa',            type: 'single', categoryIds: [3697, 3960], catName: null,                catAlias: ['obudowy komputerowe', 'obudowy pc', 'obudowy do komputerow', 'pc case', 'gehause', 'obudow'], catExclude: ['dysk', 'hdd', 'ssd', 'nas', 'zewnetrz'] },
+    { id: 8,  key: 'casePc',      label: '8. Obudowa',            type: 'single', categoryIds: [3697, 3960], catName: null,                catAlias: ['obudowy komputerowe', 'obudowy pc', 'obudowy do komputerow', 'pc case', 'gehause', 'obudow'], catExclude: ['dysk', 'hdd', 'ssd', 'nas', 'zewnetrz', 'wentylator', 'fan', 'vga'] },
     { id: 9,  key: 'os',          label: '9. System OS',          type: 'single', categoryIds: [3733], catName: 'Systemy operacyjne',     catAlias: ['systemy operacyjne', 'system operacyjny', 'operating system'] },
     { id: 10, key: 'accessories', label: '10. Akcesoria',         type: 'accessories' },
     { id: 11, key: 'services',    label: '11. Usługi',            type: 'services' }
@@ -1040,8 +1040,7 @@ async function loadStepContent() {
       const matched = cats.filter(c => scoreCat(c) > 0).sort((a, b) => scoreCat(b) - scoreCat(a));
       categoryIds = matched.map(c => c.id);
       if (step.key === 'cooler' || step.key === 'ram' || step.key === 'os' || step.key === 'casePc') {
-        const specific = matched.filter(c => scoreCat(c) >= 5);
-        if (specific.length) categoryIds = specific.map(c => c.id);
+        categoryIds = matched.filter(c => scoreCat(c) >= 5).map(c => c.id);
       }
       catId = categoryIds[0] || null;
     } catch (e) {
