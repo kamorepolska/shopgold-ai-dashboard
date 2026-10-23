@@ -557,7 +557,7 @@ const ConfigState = {
   steps: [
     { id: 1,  key: 'cpu',         label: '1. Procesor',          type: 'single', categoryIds: [3691], catName: 'Procesory',              catAlias: ['procesor'] },
     { id: 2,  key: 'mb',          label: '2. Płyta główna',       type: 'single', categoryIds: [3695, 3967, 3944, 3956, 3950], catName: null,           catAlias: ['płyty główne', 'mainboards', 'motherboards', 'płyta główna'] },
-    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylatory do procesor', 'chłodzenie procesor', 'chłodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chłodzenie wodne', 'chłodzenie', 'wentylator', 'cooler'] },
+    { id: 3,  key: 'cooler',      label: '3. Chłodzenie',         type: 'single', categoryIds: [4131], catName: 'Wentylatory Do Procesorów',             catAlias: ['wentylatory do procesor', 'chłodzenie procesor', 'chłodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chłodzenie wodne', 'chłodzenie aio', 'chłodzenie'], catExclude: ['obudow', 'vga', 'wentylatory do obud'] },
     { id: 4,  key: 'ram',         label: '4. Pamięć RAM',         type: 'single', categoryIds: [4211, 4282], catName: null,            catAlias: ['pamiec', 'dimm', 'so-dimm', 'pamięci do komputerów'] },
     { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne'] },
     { id: 6,  key: 'gpu',         label: '6. Karta graficzna',    type: 'single', categoryIds: [3694, 3987], catName: null,        catAlias: ['karta graficzna', 'karty graficzne'] },
@@ -1046,23 +1046,7 @@ async function loadStepContent() {
     try {
       const catsData = await API.get('/oferter/setup/categories');
       const cats = catsData.categories || [];
-      const norm = s => (s || '').toLowerCase()
-        .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
-        .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
-        .replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z');
-      const aliases = [
-        ...(Array.isArray(step.catAlias) ? step.catAlias : step.catAlias ? [step.catAlias] : []),
-        step.catName,
-      ].filter(Boolean).map(norm);
-      const specificAliases = aliases.filter(a => a && a.length >= 8);
-      const genericAliases = aliases.filter(a => a && a.length < 8);
-      const scoreCat = (c) => {
-        const n = norm(c.name);
-        if ((step.categoryIds || []).includes(c.id)) return 10;
-        if (specificAliases.some(a => n === a || n.includes(a))) return 5 + n.length / 100;
-        if (genericAliases.some(a => n === a || n.includes(a))) return 1;
-        return 0;
-      };
+      const scoreCat = (c) => scoreStepCategory(c, step);
       const matched = cats.filter(c => scoreCat(c) > 0).sort((a, b) => scoreCat(b) - scoreCat(a));
       categoryIds = matched.map(c => c.id);
       if (step.key === 'cooler') {
@@ -1170,7 +1154,7 @@ async function loadStepContent() {
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          activeFilters = Array.isArray(parsed) && parsed.length ? parsed : defaultFilters;
+          activeFilters = Array.isArray(parsed) ? parsed : defaultFilters;
         } catch (e) {
           activeFilters = defaultFilters;
         }
@@ -1492,15 +1476,62 @@ const ATTR_NAME_GROUPS = [
   ['wysokosc', 'height', 'hohe'],
   ['typ chlodzenia', 'cooler type', 'cooling type'],
   ['typ pamieci ram', 'memory type', 'ram type', 'typ'],
+  ['format plyty', 'format'],
+  ['liczba kosci', 'liczba kości'],
+  ['dlugosc karty', 'długość karty'],
+  ['maks. wys. chlodzenia', 'maks. wys. chłodzenia'],
+  ['maks. dl. karty graficznej', 'maks. dł. karty graficznej'],
 ];
+
+function foldCatName(s) {
+  return String(s || '').toLowerCase()
+    .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+    .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+    .replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z');
+}
+
+function containsCatToken(haystack, needle) {
+  const h = foldCatName(haystack);
+  const n = foldCatName(needle);
+  if (!h || !n) return false;
+  if (h === n) return true;
+  if (n.length >= 6 && h.includes(n)) return true;
+  const re = new RegExp('(?:^|[^a-z0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:$|[^a-z0-9])');
+  return re.test(h);
+}
+
+function scoreStepCategory(cat, step) {
+  const n = foldCatName(cat.name);
+  const excludes = step.catExclude || [];
+  if (excludes.some(ex => n.includes(foldCatName(ex)))) return 0;
+  if ((step.categoryIds || []).includes(cat.id)) return 10;
+  const aliases = [
+    ...(Array.isArray(step.catAlias) ? step.catAlias : step.catAlias ? [step.catAlias] : []),
+    step.catName,
+  ].filter(Boolean);
+  let best = 0;
+  for (const a of aliases) {
+    const fa = foldCatName(a);
+    if (!fa) continue;
+    if (n === fa) best = Math.max(best, 8);
+    else if (containsCatToken(n, fa)) best = Math.max(best, fa.length >= 8 ? 5 + n.length / 100 : 2);
+  }
+  return best;
+}
 
 function attrNamesMatch(a, b) {
   const fa = foldAttrName(a);
   const fb = foldAttrName(b);
   if (!fa || !fb) return false;
   if (fa === fb) return true;
-  if (fa.includes(fb) || fb.includes(fa)) return true;
-  return ATTR_NAME_GROUPS.some(g => g.some(x => fa.includes(x)) && g.some(x => fb.includes(x)));
+  const lastA = fa.split(/\s*\/\s*/).pop();
+  const lastB = fb.split(/\s*\/\s*/).pop();
+  if (lastA && lastB && lastA === lastB) return true;
+  return ATTR_NAME_GROUPS.some(g => {
+    const aHit = g.some(x => fa === x || lastA === x);
+    const bHit = g.some(x => fb === x || lastB === x);
+    return aHit && bHit;
+  });
 }
 
 function getAttrVal(product, attrName) {
@@ -1698,7 +1729,7 @@ const ACC_TABS = [
   { key: 'webcam',      label: '📷 Kamery',            icon: '📷', type: 'multi',  categoryIds: [3963, 3897, 3725], aliases: ['kamery internetowe', 'webcams', 'pc- & netzwerkkameras'] },
   { key: 'microphone',  label: '🎙️ Mikrofony',        icon: '🎙️', type: 'multi',  categoryIds: [5390, 3883], aliases: ['mikrofony', 'sluchawki z mikrofonem'] },
   { key: 'monitor_mount', label: '🦾 Uchwyty',         icon: '🦾', type: 'multi',  categoryIds: [4422, 4665, 4160], aliases: ['uchwyty do monitorow', 'uchwyty i ramiona do monitorow', 'akcesoria do montazu monitorow', 'ramiona do monitorow'] },
-  { key: 'case_fan',    label: '💨 Wentylatory',       icon: '💨', type: 'multi',  categoryIds: [4144, 4588], aliases: ['wentylatory do obudow', 'wentylator do obudow', 'wentylatory do obudów i vga'] },
+  { key: 'case_fan',    label: '💨 Wentylatory',       icon: '💨', type: 'multi',  categoryIds: [4144, 4588], aliases: ['wentylatory do obudow', 'wentylator do obudow', 'wentylatory do obudów i vga'], exclude: ['procesor', 'cpu cooler', 'chlodzenie wodne'] },
 ];
 
 
@@ -1728,8 +1759,9 @@ async function loadAccessoriesForStep(activeTabKey) {
     const cats = catsData.categories || [];
     matchedCats = cats.filter(cat => {
       const n = normPL(cat.name);
+      if ((tab.exclude || []).some(ex => n.includes(normPL(ex)))) return false;
       const byId = (tab.categoryIds || []).includes(cat.id);
-      const byAlias = normAliases.some(a => a && n.includes(a));
+      const byAlias = normAliases.some(a => a && (n === a || (a.length >= 6 && n.includes(a))));
       return byId || byAlias;
     });
     console.log(`[ACC] Tab "${tab.key}" matched ${matchedCats.length} categories:`, matchedCats.map(c=>c.name));
@@ -1820,8 +1852,12 @@ async function loadAccessoriesForStep(activeTabKey) {
   try {
     const stored = JSON.parse(localStorage.getItem(storageKeyF));
     if (Array.isArray(stored)) {
-      activeFilterNames = stored.filter(name => allAttrNamesAcc.includes(name));
-      if (activeFilterNames.length === 0) activeFilterNames = top6;
+      if (stored.length === 0) {
+        activeFilterNames = [];
+      } else {
+        activeFilterNames = stored.filter(name => allAttrNamesAcc.includes(name));
+        if (activeFilterNames.length === 0) activeFilterNames = top6;
+      }
     } else {
       activeFilterNames = top6;
     }

@@ -259,11 +259,11 @@ const CATEGORY_ATTR_MAP = {
   'kart pamięci': ['Pojemność', 'Typ', 'Klasa prędkości'],
   'nas': ['Zatoki', 'Procesor', 'RAM', 'Interfejs sieciowy'],
   // Memory
-  'pamięć': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja', 'Standard'],
-  'ram': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja'],
-  'ddr': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja'],
+  'pamięć': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja', 'Liczba kości', 'RGB'],
+  'ram': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja', 'Liczba kości', 'RGB'],
+  'ddr': ['Pojemność', 'Typ', 'Taktowanie', 'Latencja', 'Liczba kości', 'RGB'],
   // CPUs
-  'procesor': ['Rodzina', 'Rdzenie', 'Wątki', 'Taktowanie', 'Socket', 'TDP'],
+  'procesor': ['Rodzina', 'Rdzenie', 'Wątki', 'Taktowanie', 'Socket', 'TDP', 'Typ pamięci RAM', 'Zintegrowana grafika'],
   // Laptops / PCs
   'notebook': ['Procesor', 'RAM', 'Dysk', 'Ekran', 'GPU', 'System', 'Waga'],
   'laptop': ['Procesor', 'RAM', 'Dysk', 'Ekran', 'GPU', 'System', 'Waga'],
@@ -278,10 +278,11 @@ const CATEGORY_ATTR_MAP = {
   'lcd': ['Przekątna', 'Rozdzielczość', 'Typ matrycy', 'Odświeżanie'],
   'telewiz': ['Przekątna', 'Rozdzielczość', 'Smart TV', 'HDR'],
   // GPUs
-  'karta graficzna': ['Chipset', 'Pamięć', 'Interfejs', 'Złącza wideo', 'TDP'],
-  'gpu': ['Chipset', 'Pamięć', 'Interfejs', 'Złącza wideo'],
+  'karta graficzna': ['Chipset', 'Pamięć', 'Interfejs', 'TDP', 'Długość karty', 'RGB'],
+  'gpu': ['Chipset', 'Pamięć', 'Interfejs', 'TDP', 'Długość karty', 'RGB'],
+  'grafikkarten': ['Chipset', 'Pamięć', 'Interfejs', 'TDP', 'Długość karty', 'RGB'],
   // Motherboards
-  'płyta główna': ['Socket', 'Chipset', 'Format', 'RAM Max', 'Złącza'],
+  'płyta główna': ['Socket', 'Chipset', 'Format', 'Typ pamięci RAM', 'Sloty RAM', 'Sloty M.2', 'WiFi'],
   // PSU
   'zasilacz': ['Moc', 'Certyfikat', 'Modularność', 'Standard'],
   // UPS
@@ -342,7 +343,7 @@ const CATEGORY_ATTR_MAP = {
   'szkło hartowane': ['Kompatybilność', 'Twardość'],
   'ładowark': ['Moc', 'Złącze', 'Szybkie ładowanie'],
   // Cases / Cooling
-  'obudow': ['Format', 'Typ', 'Materiał', 'Wentylatory'],
+  'obudow': ['Format', 'Maks. wys. chłodzenia', 'Obsługa AIO', 'Maks. dł. karty graficznej', 'Kolor', 'RGB'],
   'wentylatory do procesor': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB', 'Głośność'],
   'chłodzenie procesor': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB', 'Głośność'],
   'cpu cooler': ['Typ chłodzenia', 'Socket', 'TDP', 'Wysokość', 'RGB'],
@@ -364,6 +365,8 @@ const CATEGORY_ATTR_MAP = {
   'rack': ['Wysokość U', 'Głębokość', 'Nośność'],
   // Software / Licenses
   'licencj': ['Typ', 'Okres', 'Liczba stanowisk'],
+  'systemy operacyjn': ['Wersja', 'Typ licencji'],
+  'system operacyjn': ['Wersja', 'Typ licencji'],
   'oprogramowan': ['Typ', 'System', 'Wersja'],
   'antywirus': ['Urządzenia', 'Okres', 'System'],
   'gwarancj': ['Okres', 'Typ', 'Kompatybilność'],
@@ -862,10 +865,14 @@ function rebuildCatalogForSupplier(db, supplierId) {
       let bestPrice = Infinity;
       const allEanSet = new Set();
 
-      // Merge attributes
+      // Merge attributes (flatten + canonical keys; first canonical value wins)
       const mergedAttrs = {};
+      const rebuildAliasMap = attrSync.loadAliasMaps(db);
       if (existing && existing.raw_attributes) {
-        try { Object.assign(mergedAttrs, JSON.parse(existing.raw_attributes)); } catch(e){}
+        try {
+          const prev = JSON.parse(existing.raw_attributes);
+          if (prev && typeof prev === 'object') attrSync.ingestFlatAttrs(mergedAttrs, prev, rebuildAliasMap);
+        } catch(e){}
       }
       
       for (const sp of allWithEan) {
@@ -878,10 +885,8 @@ function rebuildCatalogForSupplier(db, supplierId) {
         // Merge attributes
         if (sp.attributes) {
           try {
-            const parsed = JSON.parse(sp.attributes);
-            for (const [k, v] of Object.entries(parsed)) {
-              if (v && v !== '-') mergedAttrs[k] = v;
-            }
+            const parsed = typeof sp.attributes === 'string' ? JSON.parse(sp.attributes) : sp.attributes;
+            attrSync.ingestFlatAttrs(mergedAttrs, parsed, rebuildAliasMap);
           } catch(e) {}
         }
         // Zbierz manufacturer_code z dowolnej hurtowni (jeśli brak w pierwszej)
@@ -946,17 +951,26 @@ function rebuildCatalogForSupplier(db, supplierId) {
       // Normalizuj producenta
       const normalizedMfg = normalizeManufacturer(firstProd.manufacturer || '');
 
-      // Resolve category from supplier data
+      // Resolve category: skip Impakt id|id, prefer AB tree, then longest readable name
       let categoryId = null, categoryName = '';
+      let bestCat = null;
       for (const sp of allWithEan) {
-        if (sp.category && sp.category.trim()) {
-          categoryId = resolveCategory(db, sp.category);
-          if (categoryId) {
-            const cat = db.prepare('SELECT name FROM product_categories WHERE id = ?').get(categoryId);
-            categoryName = cat ? cat.name : sp.category;
-            break;
-          }
-        }
+        const raw = (sp.category || '').trim();
+        if (!raw || /^\d+\|\d+/.test(raw) || raw.startsWith('<')) continue;
+        const cid = resolveCategory(db, raw);
+        if (!cid) continue;
+        const cat = db.prepare('SELECT id, name, is_ab_category FROM product_categories WHERE id = ?').get(cid);
+        if (!cat) continue;
+        let score = 1 + Math.min(String(cat.name || '').length, 40) / 40;
+        if (cat.is_ab_category) score += 5;
+        if (bestCat == null || score > bestCat.score) bestCat = { id: cat.id, name: cat.name, score };
+      }
+      if (bestCat) {
+        categoryId = bestCat.id;
+        categoryName = bestCat.name || '';
+      } else if (existing && existing.category_id) {
+        categoryId = existing.category_id;
+        categoryName = existing.category_name || '';
       }
 
       const origNamesJson = JSON.stringify(origNames);
@@ -1854,8 +1868,9 @@ function getProductAttributes(db, catalogId, categoryId) {
   const hasVisible = caCols.includes('visible');
   const visibleFilter = hasVisible ? 'AND (ca.visible = 1 OR ca.visible IS NULL)' : '';
 
+  let rows;
   if (categoryId) {
-    return db.prepare(`
+    rows = db.prepare(`
       SELECT pa.id, pa.value_text, pa.value_numeric,
              ca.id as attr_id, ca.attr_name, ca.attr_type, ca.attr_unit, ca.is_filter, ca.sort_order
       FROM category_attributes ca
@@ -1864,7 +1879,7 @@ function getProductAttributes(db, catalogId, categoryId) {
       ORDER BY ca.sort_order ASC, ca.attr_name ASC
     `).all(catalogId, categoryId);
   } else {
-    return db.prepare(`
+    rows = db.prepare(`
       SELECT pa.id, pa.value_text, pa.value_numeric,
              ca.id as attr_id, ca.attr_name, ca.attr_type, ca.attr_unit, ca.is_filter, ca.sort_order
       FROM product_attributes pa
@@ -1873,6 +1888,23 @@ function getProductAttributes(db, catalogId, categoryId) {
       ORDER BY ca.sort_order ASC, ca.attr_name ASC
     `).all(catalogId);
   }
+
+  const product = db.prepare('SELECT id, raw_attributes FROM catalog_master WHERE id = ?').get(catalogId);
+  if (!product || !rows.length) return rows;
+  const defs = rows.map(r => ({ attr_name: r.attr_name, attr_type: r.attr_type, attr_unit: r.attr_unit }));
+  let filled = [];
+  try { filled = attrSync.attributesFromCatalog(db, product, defs); } catch (_) { return rows; }
+  const byName = new Map(filled.map(a => [attrSync.fold(a.attr_name), a]));
+  for (const r of rows) {
+    if ((r.value_text == null || r.value_text === '') && r.value_numeric == null) {
+      const hit = byName.get(attrSync.fold(r.attr_name));
+      if (hit) {
+        r.value_text = hit.value_text;
+        r.value_numeric = hit.value_numeric;
+      }
+    }
+  }
+  return rows;
 }
 
 /**
@@ -1885,11 +1917,24 @@ function setProductAttribute(db, catalogId, attrId, valueText, valueNumeric = nu
     if (!isNaN(num)) valueNumeric = num;
   }
 
+  attrSync.ensureProductAttrSource(db);
   const existing = db.prepare('SELECT id FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?').get(catalogId, attrId);
   if (existing) {
-    db.prepare('UPDATE product_attributes SET value_text = ?, value_numeric = ? WHERE id = ?').run(valueText, valueNumeric, existing.id);
+    try {
+      db.prepare("UPDATE product_attributes SET value_text = ?, value_numeric = ?, source = 'manual' WHERE id = ?")
+        .run(valueText, valueNumeric, existing.id);
+    } catch (_) {
+      db.prepare('UPDATE product_attributes SET value_text = ?, value_numeric = ? WHERE id = ?')
+        .run(valueText, valueNumeric, existing.id);
+    }
   } else {
-    db.prepare('INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)').run(catalogId, attrId, valueText, valueNumeric);
+    try {
+      db.prepare("INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, 'manual')")
+        .run(catalogId, attrId, valueText, valueNumeric);
+    } catch (_) {
+      db.prepare('INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)')
+        .run(catalogId, attrId, valueText, valueNumeric);
+    }
   }
   return { success: true };
 }
@@ -3420,6 +3465,226 @@ Odpowiedz TYLKO JSON array [{\"name\": \"...\", \"category_id\": X}, ...]`;
   };
 }
 
+/**
+ * Buduje drzewo kategorii AB z feedu hurtowni i przypisuje produkty.
+ * Nie zeruje istniejących category_id — nadpisuje tylko tam, gdzie AB ma ścieżkę,
+ * a keyword matching dotyczy wyłącznie produktów bez kategorii.
+ */
+function generateAbCategoryTree(db) {
+  registerNormalizeEan(db);
+
+  function makeSlug(str) {
+    return (str || '').toLowerCase()
+      .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+      .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+      .replace(/ś/g,'s').replace(/ż/g,'z').replace(/ź/g,'z')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function norm(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s || s.startsWith('<') || s.length < 2) return null;
+    if (/^\d+\|\d+/.test(s)) return null;
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  function tokenize(str) {
+    return (str || '').toLowerCase()
+      .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+      .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+      .replace(/ś/g,'s').replace(/ż/g,'z').replace(/ź/g,'z')
+      .split(/[^a-z0-9]+/).filter(w => w.length > 2);
+  }
+
+  function isSameCategory(a, b) {
+    const ta = tokenize(a);
+    const tb = tokenize(b);
+    if (ta.length === 0 || tb.length === 0) return false;
+    const shared = ta.filter(w => tb.includes(w)).length;
+    const minLen = Math.min(ta.length, tb.length);
+    return shared >= minLen * 0.6 && shared >= 1;
+  }
+
+  try {
+    db.prepare('UPDATE product_categories SET is_ab_category = 0, parent_id = NULL').run();
+    db.prepare(`DELETE FROM product_categories WHERE
+      name LIKE '%:%' OR name LIKE '%>%' OR name LIKE '%|%'
+      OR name LIKE '<%' OR length(trim(name)) < 2`).run();
+  } catch (_) {}
+
+  const abSupplier = db.prepare(`
+    SELECT supplier_id, COUNT(DISTINCT category) as cnt
+    FROM supplier_products
+    WHERE category IS NOT NULL AND trim(category) != '' AND category NOT LIKE '<%'
+      AND category NOT LIKE '%|%'
+    GROUP BY supplier_id ORDER BY cnt DESC LIMIT 1
+  `).get();
+
+  if (!abSupplier) {
+    const mfrs = db.prepare(`
+      SELECT manufacturer, COUNT(*) as cnt FROM catalog_master
+      WHERE manufacturer IS NOT NULL AND manufacturer != ''
+      GROUP BY manufacturer ORDER BY cnt DESC LIMIT 200
+    `).all();
+    if (!mfrs.length) return { ok: false, created: 0, assignedAB: 0, assignedOther: 0, message: 'Brak danych kategorii i producentów.' };
+    let fc = 0, fa = 0;
+    for (const m of mfrs) {
+      const slug = makeSlug(m.manufacturer);
+      db.prepare('INSERT OR IGNORE INTO product_categories (name,slug,is_ab_category,product_count) VALUES(?,?,1,?)').run(m.manufacturer, slug, m.cnt);
+      const cat = db.prepare('SELECT id FROM product_categories WHERE name=? LIMIT 1').get(m.manufacturer);
+      if (cat) {
+        db.prepare('UPDATE product_categories SET is_ab_category=1 WHERE id=?').run(cat.id);
+        fa += db.prepare('UPDATE catalog_master SET category_id=?,category_name=? WHERE manufacturer=? AND (category_id IS NULL OR category_id = 0)').run(cat.id, m.manufacturer, m.manufacturer).changes;
+        fc++;
+      }
+    }
+    db.prepare('UPDATE product_categories SET product_count=(SELECT COUNT(*) FROM catalog_master WHERE category_id=product_categories.id)').run();
+    return { ok: true, created: fc, assignedAB: fa, assignedOther: 0, message: `Wygenerowano ${fc} kategorii z producentów, przypisano ${fa} produktów bez kategorii.` };
+  }
+
+  const idMap = new Map();
+  let created = 0;
+
+  const abPaths = db.prepare(`
+    SELECT DISTINCT category FROM supplier_products
+    WHERE supplier_id = ? AND category IS NOT NULL AND trim(category) != '' AND category NOT LIKE '<%'
+      AND category NOT LIKE '%|%'
+    ORDER BY category
+  `).all(abSupplier.supplier_id);
+
+  for (const row of abPaths) {
+    const parts = row.category.split(/\s*[>\/\\|:]\s*/).map(norm).filter(Boolean);
+    if (!parts.length) continue;
+
+    let parentId = null;
+    for (const name of parts) {
+      const normKey = tokenize(name).sort().join('-');
+      const mapKey = `${parentId}|${normKey}`;
+
+      if (idMap.has(mapKey)) {
+        parentId = idMap.get(mapKey);
+        continue;
+      }
+
+      const siblings = db.prepare(`
+        SELECT id, name FROM product_categories
+        WHERE ${parentId === null ? 'parent_id IS NULL' : 'parent_id = ?'}
+        AND is_ab_category = 1
+      `).all(...(parentId === null ? [] : [parentId]));
+
+      let catId = null;
+      for (const sib of siblings) {
+        if (isSameCategory(sib.name, name)) { catId = sib.id; break; }
+      }
+
+      if (!catId) {
+        try {
+          const r = db.prepare(
+            'INSERT INTO product_categories (name,slug,parent_id,is_ab_category) VALUES(?,?,?,1)'
+          ).run(name, makeSlug(name), parentId);
+          catId = Number(r.lastInsertRowid);
+          created++;
+        } catch (e) {
+          const ex = db.prepare(
+            'SELECT id FROM product_categories WHERE lower(name)=lower(?) AND (parent_id IS ? OR parent_id=?)'
+          ).get(name, parentId, parentId);
+          catId = ex ? ex.id : null;
+        }
+      }
+
+      if (catId) {
+        db.prepare('UPDATE product_categories SET is_ab_category=1, parent_id=? WHERE id=?').run(parentId, catId);
+        idMap.set(mapKey, catId);
+        parentId = catId;
+      }
+    }
+  }
+
+  const pathToLeaf = new Map();
+  for (const row of abPaths) {
+    const parts = row.category.split(/\s*[>\/\\|:]\s*/).map(norm).filter(Boolean);
+    if (!parts.length) continue;
+    let parentId = null;
+    let leafId = null;
+    for (const name of parts) {
+      const normKey = tokenize(name).sort().join('-');
+      const mapKey = `${parentId}|${normKey}`;
+      leafId = idMap.get(mapKey) || null;
+      parentId = leafId;
+    }
+    if (leafId) pathToLeaf.set(row.category, leafId);
+  }
+
+  const updByNorm = db.prepare('UPDATE catalog_master SET category_id=?, category_name=? WHERE normalize_ean(canonical_ean) = normalize_ean(?)');
+  const spRows = db.prepare(
+    `SELECT ean, normalized_ean, category FROM supplier_products WHERE supplier_id=? AND category IS NOT NULL AND category!=''`
+  ).all(abSupplier.supplier_id);
+
+  let assignedAB = 0;
+  for (const sp of spRows) {
+    const leafId = pathToLeaf.get(sp.category);
+    if (!leafId) continue;
+    const cat = db.prepare('SELECT name FROM product_categories WHERE id=?').get(leafId);
+    assignedAB += updByNorm.run(leafId, cat?.name || '', sp.normalized_ean || sp.ean).changes;
+  }
+
+  const leafCats = db.prepare(`
+    SELECT pc.id, pc.name,
+      COALESCE((SELECT p2.name FROM product_categories p2 WHERE p2.id=pc.parent_id),'') as parent_name
+    FROM product_categories pc
+    WHERE pc.is_ab_category=1
+      AND NOT EXISTS (SELECT 1 FROM product_categories c2 WHERE c2.parent_id=pc.id)
+  `).all();
+
+  const leafTokens = leafCats.map(lc => ({
+    id: lc.id,
+    name: lc.name,
+    tokens: [...tokenize(lc.name), ...tokenize(lc.parent_name)]
+  }));
+
+  function bestMatch(productName, manufacturer) {
+    const pTokens = [...new Set([...tokenize(productName), ...tokenize(manufacturer || '')])];
+    let best = null, bestScore = 0;
+    for (const lc of leafTokens) {
+      let score = 0;
+      for (const pw of pTokens) {
+        for (const cw of lc.tokens) {
+          if (cw === pw) score += 3;
+          else if (cw.length > 3 && pw.length > 3 && (cw.includes(pw) || pw.includes(cw))) score += 1;
+        }
+      }
+      if (score > bestScore) { bestScore = score; best = lc; }
+    }
+    return bestScore >= 2 ? best : null;
+  }
+
+  const unassigned = db.prepare(`
+    SELECT id, canonical_ean, name, manufacturer
+    FROM catalog_master
+    WHERE (category_id IS NULL OR category_id = 0) AND name IS NOT NULL AND name != ''
+  `).all();
+
+  const updOtherStmt = db.prepare('UPDATE catalog_master SET category_id=?,category_name=? WHERE id=?');
+  let assignedOther = 0;
+  for (const prod of unassigned) {
+    const match = bestMatch(prod.name, prod.manufacturer);
+    if (match) {
+      updOtherStmt.run(match.id, match.name, prod.id);
+      assignedOther++;
+    }
+  }
+
+  db.prepare(`UPDATE product_categories SET product_count=(
+    SELECT COUNT(*) FROM catalog_master WHERE category_id=product_categories.id
+  )`).run();
+
+  return {
+    ok: true, created, assignedAB, assignedOther,
+    message: `Zbudowano ${created} kategorii AB · ${assignedAB} produktów AB · ${assignedOther} bez kategorii (keyword matching)`
+  };
+}
+
 module.exports = {
   CATEGORY_ATTR_MAP,
   normalizeEan,
@@ -3470,6 +3735,7 @@ module.exports = {
   remapCategoryToAb,
   getSupplierList,
   getUnmappedCategories,
+  generateAbCategoryTree,
   // Category normalization & AI assignment
   mergeAndNormalizeCategories,
   aiAssignUnmappedProducts,

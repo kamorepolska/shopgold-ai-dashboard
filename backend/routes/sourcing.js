@@ -731,7 +731,14 @@ router.post('/suppliers/:id/files/:fid/refresh', (req, res, next) => upload.sing
       svc.updateSupplierFile(fid, { file_path: req.file.path, source_type: 'file' });
     }
     const { products } = await svc.refreshOneSupplierFile(fid);
-    res.json({ success: true, imported: products.length });
+    let imported = products.length;
+    try {
+      const merged = await svc.refreshSupplier(parseInt(req.params.id));
+      imported = merged.imported;
+    } catch (e) {
+      console.warn('[sourcing] catalog rebuild after extra file:', e.message);
+    }
+    res.json({ success: true, imported });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -1711,7 +1718,7 @@ router.get('/suppliers/:id/raw-categories', (req, res) => {
       SELECT pc.id as cat_id, pc.name as cat_name, pc.parent_id,
              pc2.name as parent_name, COUNT(*) as match_cnt
       FROM supplier_products sp
-      JOIN catalog_master cm ON cm.canonical_ean = sp.ean
+      JOIN catalog_master cm ON normalize_ean(cm.canonical_ean) = COALESCE(NULLIF(sp.normalized_ean, ''), normalize_ean(sp.ean))
       JOIN product_categories pc ON pc.id = cm.category_id
       LEFT JOIN product_categories pc2 ON pc2.id = pc.parent_id
       WHERE sp.supplier_id = ? AND sp.category = ?
@@ -1744,47 +1751,11 @@ router.get('/suppliers/:id/raw-categories', (req, res) => {
 
 
 
-// POST /api/sourcing/catalog/generate-categories — auto-generuj kategorie z producentów
+// POST /api/sourcing/catalog/generate-categories — to samo drzewo AB co /api/generate-categories
 router.post('/catalog/generate-categories', (req, res) => {
   try {
-    const db = svc.getDb();
-    // Clear old AB marks
-    db.prepare('UPDATE product_categories SET is_ab_category = 0').run();
-    
-    // Generate from manufacturers
-    const manufacturers = db.prepare(`
-      SELECT manufacturer, COUNT(*) as cnt
-      FROM catalog_master
-      WHERE manufacturer IS NOT NULL AND manufacturer != ''
-      GROUP BY manufacturer
-      ORDER BY cnt DESC
-      LIMIT 200
-    `).all();
-
-    if (manufacturers.length === 0) {
-      return res.json({ ok: false, message: 'Brak producentów w katalogu. Najpierw odśwież hurtownie.' });
-    }
-
-    let created = 0, assigned = 0;
-    for (const m of manufacturers) {
-      const name = m.manufacturer;
-      const slug = name.toLowerCase().replace(/[^a-z0-9ąćęłńóśżź]+/g, '-').replace(/^-|-$/g, '');
-      
-      // Upsert category
-      db.prepare(`INSERT OR IGNORE INTO product_categories (name, slug, is_ab_category, product_count) VALUES (?, ?, 1, ?)`).run(name, slug, m.cnt);
-      const cat = db.prepare('SELECT id FROM product_categories WHERE name = ? LIMIT 1').get(name);
-      if (cat) {
-        db.prepare('UPDATE product_categories SET is_ab_category = 1 WHERE id = ?').run(cat.id);
-        const r = db.prepare('UPDATE catalog_master SET category_id = ?, category_name = ? WHERE manufacturer = ? AND (category_id IS NULL OR category_id = 0)').run(cat.id, name, name);
-        assigned += r.changes;
-        created++;
-      }
-    }
-
-    // Refresh counts  
-    db.prepare('UPDATE product_categories SET product_count = (SELECT COUNT(*) FROM catalog_master WHERE category_id = product_categories.id)').run();
-
-    res.json({ ok: true, created, assigned, message: `Utworzono ${created} kategorii, przypisano ${assigned} produktów.` });
+    const result = catalogSvc.generateAbCategoryTree(svc.getDb());
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

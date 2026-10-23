@@ -92,11 +92,11 @@ function registerFileJob(file) {
   const task = cron.schedule(expr, async () => {
     console.log(`[scheduler] ▶ Auto-refresh pliku (ID ${fid}) ...`);
     try {
-      const result = await svc.refreshOneSupplierFile(fid);
+      const result = await svc.refreshSupplier(file.supplier_id);
       svc.markFileScheduledRun(fid);
       svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'ok',
-        details: `Harmonogram pliku (${file.label}): wczytano ${result.products.length} SKU` });
-      console.log(`[scheduler] ✅ Plik ID ${fid} — ${result.products.length} SKU`);
+        details: `Harmonogram pliku (${file.label}): scalono ${result.imported} SKU i przebudowano katalog` });
+      console.log(`[scheduler] ✅ Plik ID ${fid} — ${result.imported} SKU + katalog`);
     } catch (err) {
       svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'error', details: `Plik ID ${fid}: ${err.message}` });
       console.error(`[scheduler] ❌ Plik ID ${fid}: ${err.message}`);

@@ -47,6 +47,7 @@ function makeDb() {
       attribute_id INTEGER NOT NULL,
       value_text TEXT,
       value_numeric REAL,
+      source TEXT DEFAULT 'supplier',
       UNIQUE(catalog_id, attribute_id)
     );
     CREATE TABLE attr_aliases (alias TEXT, canonical_name TEXT);
@@ -112,12 +113,56 @@ function testManualNotOverwritten() {
   db.prepare('INSERT INTO product_categories (id, name) VALUES (1, ?)').run('Procesory');
   db.prepare(`INSERT INTO category_attributes (category_id, attr_name) VALUES (1, 'Socket')`).run();
   db.prepare(`INSERT INTO catalog_master (canonical_ean, name, category_id, raw_attributes) VALUES ('111', 'CPU', 1, '{"Socket":"AM4"}')`).run();
-  db.prepare(`INSERT INTO product_attributes (catalog_id, attribute_id, value_text) VALUES (1, 1, 'AM5-manual')`).run();
+  db.prepare(`INSERT INTO product_attributes (catalog_id, attribute_id, value_text, source) VALUES (1, 1, 'AM5-manual', 'manual')`).run();
   db.prepare(`INSERT INTO supplier_products (supplier_id, ean, normalized_ean, attributes) VALUES (1, '111', '111', '{"Socket":"AM4"}')`).run();
   attrSync.syncCatalogAttributes(db, { seedSchemas: false });
   const row = db.prepare('SELECT value_text FROM product_attributes WHERE catalog_id = 1').get();
   assert.strictEqual(row.value_text, 'AM5-manual');
   db.close();
+}
+
+function testSupplierValueRefreshed() {
+  const db = makeDb();
+  db.prepare('INSERT INTO product_categories (id, name) VALUES (1, ?)').run('Procesory');
+  db.prepare(`INSERT INTO category_attributes (category_id, attr_name) VALUES (1, 'Socket')`).run();
+  db.prepare(`INSERT INTO catalog_master (canonical_ean, name, category_id, raw_attributes) VALUES ('111', 'CPU', 1, '{}')`).run();
+  db.prepare(`INSERT INTO product_attributes (catalog_id, attribute_id, value_text, source) VALUES (1, 1, 'AM4', 'supplier')`).run();
+  db.prepare(`INSERT INTO supplier_products (supplier_id, ean, normalized_ean, attributes) VALUES (1, '111', '111', '{"Socket":"AM5"}')`).run();
+  const result = attrSync.syncCatalogAttributes(db, { seedSchemas: false });
+  assert.ok(result.refreshed >= 1, 'stale supplier value should refresh');
+  const row = db.prepare('SELECT value_text FROM product_attributes WHERE catalog_id = 1').get();
+  assert.strictEqual(row.value_text, 'AM5');
+  db.close();
+}
+
+function testMigrateDuplicateAttrNames() {
+  const db = makeDb();
+  db.prepare('INSERT INTO product_categories (id, name) VALUES (1, ?)').run('Procesory');
+  db.prepare(`INSERT INTO category_attributes (category_id, attr_name) VALUES (1, 'Liczba rdzeni')`).run();
+  db.prepare(`INSERT INTO category_attributes (category_id, attr_name) VALUES (1, 'Rdzenie')`).run();
+  db.prepare(`INSERT INTO catalog_master (canonical_ean, name, category_id) VALUES ('111', 'CPU', 1)`).run();
+  const cores = db.prepare("SELECT id FROM category_attributes WHERE attr_name = 'Liczba rdzeni'").get();
+  db.prepare(`INSERT INTO product_attributes (catalog_id, attribute_id, value_text) VALUES (1, ?, '6')`).run(cores.id);
+  const merged = attrSync.migrateDuplicateCategoryAttrs(db);
+  assert.ok(merged >= 1);
+  const names = db.prepare('SELECT attr_name FROM category_attributes WHERE category_id = 1').all().map(r => r.attr_name);
+  assert.ok(names.includes('Rdzenie'));
+  assert.ok(!names.includes('Liczba rdzeni'));
+  const pa = db.prepare('SELECT value_text FROM product_attributes WHERE catalog_id = 1').get();
+  assert.strictEqual(pa.value_text, '6');
+  db.close();
+}
+
+function testMatchAttrMapKeyPrefersCpuCooler() {
+  const map = {
+    aio: ['Procesor', 'RAM'],
+    chłodzeni: ['Socket', 'TDP'],
+    'wentylatory do procesor': ['Socket', 'TDP'],
+    wentylator: ['Rozmiar'],
+  };
+  assert.strictEqual(attrSync.matchAttrMapKey('Wentylatory Do Procesorów', map), 'wentylatory do procesor');
+  assert.strictEqual(attrSync.matchAttrMapKey('Chłodzenie AIO', map), 'chłodzeni');
+  assert.strictEqual(attrSync.matchAttrMapKey('Wentylatory do obudów', map), 'wentylator');
 }
 
 function testActionSectionKeysResolveToCanonical() {
@@ -197,6 +242,9 @@ testSocketFromGermanFeed();
 testNamesMatchSynonyms();
 testJunkFilter();
 testManualNotOverwritten();
+testSupplierValueRefreshed();
+testMigrateDuplicateAttrNames();
+testMatchAttrMapKeyPrefersCpuCooler();
 testActionSectionKeysResolveToCanonical();
 testFlattenNestedParameters();
 testSeedPrefersCpuCoolerSchema();

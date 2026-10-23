@@ -23,6 +23,7 @@ const JUNK_KEYS = new Set([
   'waga brutto', 'waga netto', 'data dodania', 'producent', 'data',
   'artnr', 'herstnr', 'hersteller', 'artname', 'beschreibung', 'menge', 'verfuegbar',
   'vkbrutto', 'vknetto', 'einkauf', 'kat1', 'kat2', 'kat3', 'indate',
+  'gam', 'twrid', 'itemid', 'item_id', 'productid', 'product_id',
 ]);
 
 const JUNK_RE = /cena|marż|marza|brutto|netto|narzut|sprzedaż|kupna|price|rabat|discount|\bid\b|kod\b|code\b|index\b|indeks|sku\b|erp\b|symbol\b|elko|artykuł|artykul|nr\.\s*art|numer art|katalog|magazyn|dostępn|dostepn|\bilosc\b|\bilość\b|gabaryt|opakow|wymiary opak|waga\s+(brutto|netto)|\bkategor|\bgrupa\b|\bpodkategor|\bnadkategor|\bpodgrupa/i;
@@ -65,6 +66,44 @@ const WEAK_ATTR_TOKENS = new Set([
   'watt', 'power', 'size', 'type', 'typ', 'speed', 'mhz', 'ram', 'ddr', 'mm', 'gb', 'w',
 ]);
 
+/** Zduplikowane etykiety z seedu Ofertera / starych schematów → kanoniczna nazwa katalogu. */
+const ATTR_NAME_RENAMES = [
+  ['liczba rdzeni', 'Rdzenie'],
+  ['liczba watkow', 'Wątki'],
+  ['vram', 'Pamięć'],
+  ['chip', 'Chipset'],
+  ['pojemnosc', 'Pojemność'],
+  ['dlugosc karty', 'Długość karty'],
+  ['certyfikacja', 'Certyfikat'],
+  ['modularnosc', 'Modularność'],
+  ['format plyty', 'Format'],
+  ['liczba kosci', 'Liczba kości'],
+  ['wysokosc', 'Wysokość'],
+  ['typ chlodzenia', 'Typ chłodzenia'],
+  ['typ pamieci ram', 'Typ pamięci RAM'],
+  ['typ pamieci', 'Typ pamięci RAM'],
+  ['max tdp', 'TDP'],
+  ['kompatybilne sockety', 'Socket'],
+  ['maks. wys. chlodzenia', 'Maks. wys. chłodzenia'],
+  ['maks. dl. karty graficznej', 'Maks. dł. karty graficznej'],
+  ['obsluga aio', 'Obsługa AIO'],
+];
+
+const ATTR_UNITS = {
+  TDP: 'W',
+  Wysokość: 'mm',
+  Moc: 'W',
+  Pojemność: 'GB',
+  Taktowanie: 'MHz',
+  'Długość karty': 'mm',
+  Obroty: 'RPM',
+  Głośność: 'dB',
+  Rozmiar: 'mm',
+  'Maks. wys. chłodzenia': 'mm',
+  'Maks. dł. karty graficznej': 'mm',
+  'Maks. taktowanie RAM': 'MHz',
+};
+
 const NUMERIC_HINT = /tdp|rdzen|w[aą]tk|pojemn|moc\b|taktowan|mhz|ghz|vram|wysoko|d[lł]ugo|sloty|liczba|obroty|cache|watt|\bgb\b|\bmm\b/i;
 
 const PC_ATTR_ALIASES = [
@@ -98,7 +137,7 @@ const PC_ATTR_ALIASES = [
   ['ram slots', 'Sloty RAM'], ['dimm slots', 'Sloty RAM'],
   ['m.2 slots', 'Sloty M.2'], ['m2 slots', 'Sloty M.2'],
   ['interface', 'Interfejs'], ['pcie', 'Interfejs'],
-  ['chipset', 'Chipset'], ['grafikchip', 'Chip'],
+  ['chipset', 'Chipset'], ['grafikchip', 'Chipset'], ['chip', 'Chipset'], ['gpu chip', 'Chipset'],
   ['typ chlodzenia', 'Typ chłodzenia'], ['typ chłodzenia', 'Typ chłodzenia'],
   ['cooler type', 'Typ chłodzenia'], ['cooling type', 'Typ chłodzenia'],
   ['rodzaj chlodzenia', 'Typ chłodzenia'],
@@ -269,6 +308,15 @@ function resolveKey(rawKey, aliasMap) {
   return last && last !== folded ? last : original;
 }
 
+function containsToken(haystack, needle) {
+  const h = fold(haystack);
+  const n = fold(needle);
+  if (!h || !n) return false;
+  if (h === n) return true;
+  const re = new RegExp('(?:^|[^a-z0-9])' + n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:$|[^a-z0-9])');
+  return re.test(h);
+}
+
 function namesMatch(a, b) {
   const fa = fold(a);
   const fb = fold(b);
@@ -432,27 +480,105 @@ function mapRawToCategoryAttrs(raw, catAttrs, aliasMap) {
   return mapped;
 }
 
-function seedCategoryAttrSchema(db, categoryId, categoryName, attrMap) {
-  if (!attrMap) return 0;
+function canonicalizeAttrName(name, aliasMap) {
+  const resolved = resolveKey(name, aliasMap || new Map());
+  const f = fold(resolved);
+  for (const [from, to] of ATTR_NAME_RENAMES) {
+    if (f === fold(from)) return to;
+  }
+  return resolved || String(name || '').trim();
+}
+
+function ensureProductAttrSource(db) {
+  try { db.exec("ALTER TABLE product_attributes ADD COLUMN source TEXT DEFAULT 'supplier'"); } catch (_) {}
+}
+
+function migrateDuplicateCategoryAttrs(db) {
+  ensureProductAttrSource(db);
+  const aliasMap = loadAliasMaps(db);
+  let merged = 0;
+  let cats;
+  try {
+    cats = db.prepare('SELECT DISTINCT category_id FROM category_attributes').all();
+  } catch (_) {
+    return 0;
+  }
+  const tx = db.transaction(() => {
+    for (const { category_id } of cats) {
+      const attrs = db.prepare('SELECT * FROM category_attributes WHERE category_id = ?').all(category_id);
+      const groups = new Map();
+      for (const a of attrs) {
+        const canon = canonicalizeAttrName(a.attr_name, aliasMap);
+        const key = fold(canon);
+        if (!groups.has(key)) {
+          groups.set(key, { canon, keep: a, extras: [] });
+        } else {
+          const g = groups.get(key);
+          if (fold(g.keep.attr_name) !== fold(canon) && fold(a.attr_name) === fold(canon)) {
+            g.extras.push(g.keep);
+            g.keep = a;
+          } else {
+            g.extras.push(a);
+          }
+        }
+      }
+      for (const g of groups.values()) {
+        if (fold(g.keep.attr_name) !== fold(g.canon)) {
+          try {
+            db.prepare('UPDATE category_attributes SET attr_name = ? WHERE id = ?').run(g.canon, g.keep.id);
+          } catch (_) {}
+        }
+        for (const extra of g.extras) {
+          const pas = db.prepare('SELECT * FROM product_attributes WHERE attribute_id = ?').all(extra.id);
+          for (const pa of pas) {
+            const exists = db.prepare('SELECT id FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?')
+              .get(pa.catalog_id, g.keep.id);
+            if (!exists) {
+              db.prepare('UPDATE product_attributes SET attribute_id = ? WHERE id = ?').run(g.keep.id, pa.id);
+            } else {
+              db.prepare('DELETE FROM product_attributes WHERE id = ?').run(pa.id);
+            }
+          }
+          db.prepare('DELETE FROM category_attributes WHERE id = ?').run(extra.id);
+          merged++;
+        }
+      }
+    }
+  });
+  try { tx(); } catch (e) { console.warn('[catalog] migrate duplicate attrs:', e.message); }
+  return merged;
+}
+
+function matchAttrMapKey(categoryName, attrMap) {
+  if (!attrMap) return null;
   const nameLower = fold(categoryName);
   let bestKey = null;
   let bestLen = 0;
   for (const keyword of Object.keys(attrMap)) {
     const fk = fold(keyword);
-    if (fk && nameLower.includes(fk) && fk.length > bestLen) {
-      bestKey = keyword;
-      bestLen = fk.length;
-    }
+    if (!fk || fk.length <= bestLen || !nameLower.includes(fk)) continue;
+    if (fk === 'wentylator' && /procesor|cpu|chlodzen|kuhler|heatsink/.test(nameLower)) continue;
+    if (fk === 'aio' && /chlodzen|kuhler|wentylator/.test(nameLower)) continue;
+    if (fk === 'obudow' && /wentylator/.test(nameLower)) continue;
+    if (fk === 'pamiec' && /karta graficzn|gpu|grafik/.test(nameLower)) continue;
+    bestKey = keyword;
+    bestLen = fk.length;
   }
+  return bestKey;
+}
+
+function seedCategoryAttrSchema(db, categoryId, categoryName, attrMap) {
+  const bestKey = matchAttrMapKey(categoryName, attrMap);
   if (!bestKey) return 0;
   let inserted = 0;
   attrMap[bestKey].forEach((name, i) => {
     const type = isNumericAttr(name) ? 'numeric' : 'text';
+    const unit = ATTR_UNITS[name] || null;
     try {
       const r = db.prepare(`
         INSERT OR IGNORE INTO category_attributes (category_id, attr_name, attr_type, attr_unit, sort_order, is_filter, visible)
         VALUES (?, ?, ?, ?, ?, 1, 1)
-      `).run(categoryId, name, type, null, i);
+      `).run(categoryId, name, type, unit, i);
       if (r.changes) inserted++;
     } catch (_) {
       try {
@@ -472,6 +598,10 @@ function seedCategoryAttrSchema(db, categoryId, categoryName, attrMap) {
 function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas = true, attrMap = null } = {}) {
   registerNormalizeEan(db);
   ensurePcAttrAliases(db);
+  ensureProductAttrSource(db);
+  try { migrateDuplicateCategoryAttrs(db); } catch (e) {
+    console.warn('[catalog] migrate attrs:', e.message);
+  }
   const aliasMap = loadAliasMaps(db);
 
   if (seedSchemas && attrMap) {
@@ -526,11 +656,22 @@ function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas
   };
 
   const updRaw = db.prepare('UPDATE catalog_master SET raw_attributes = ? WHERE id = ?');
-  const existingPa = db.prepare('SELECT id FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?');
-  const insPa = db.prepare('INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+  let existingPa;
+  let insPa;
+  let updPa;
+  try {
+    existingPa = db.prepare('SELECT id, value_text, source FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?');
+    insPa = db.prepare('INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, ?)');
+    updPa = db.prepare("UPDATE product_attributes SET value_text = ?, value_numeric = ? WHERE id = ? AND IFNULL(source, 'supplier') != 'manual'");
+  } catch (_) {
+    existingPa = db.prepare('SELECT id, value_text FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?');
+    insPa = db.prepare('INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+    updPa = db.prepare('UPDATE product_attributes SET value_text = ?, value_numeric = ? WHERE id = ?');
+  }
 
   let rawUpdated = 0;
   let filled = 0;
+  let refreshed = 0;
 
   const tx = db.transaction(() => {
     for (const p of products) {
@@ -543,15 +684,21 @@ function syncCatalogAttributes(db, { eans = null, catalogIds = null, seedSchemas
       const defs = catAttrs(p.category_id);
       const mapped = mapRawToCategoryAttrs(merged, defs, aliasMap);
       for (const m of mapped) {
-        if (existingPa.get(p.id, m.attribute_id)) continue;
-        insPa.run(p.id, m.attribute_id, m.value_text, m.value_numeric);
-        filled++;
+        const ex = existingPa.get(p.id, m.attribute_id);
+        if (!ex) {
+          try { insPa.run(p.id, m.attribute_id, m.value_text, m.value_numeric, 'supplier'); }
+          catch { insPa.run(p.id, m.attribute_id, m.value_text, m.value_numeric); }
+          filled++;
+        } else if ((ex.source || 'supplier') !== 'manual' && String(ex.value_text || '') !== String(m.value_text || '')) {
+          updPa.run(m.value_text, m.value_numeric, ex.id);
+          refreshed++;
+        }
       }
     }
   });
   tx();
 
-  return { products: products.length, filled, raw_updated: rawUpdated };
+  return { products: products.length, filled, raw_updated: rawUpdated, refreshed };
 }
 
 function hydrateProductsRaw(db, products, aliasMap) {
@@ -709,15 +856,22 @@ function attributesFromCatalog(db, product, catAttrDefs, aliasMap) {
 module.exports = {
   fold,
   isJunkAttrName,
+  isNumericAttr,
   parseNumeric,
   namesMatch,
+  containsToken,
   loadAliasMaps,
   resolveKey,
   flattenAttrObject,
+  ingestFlatAttrs,
+  canonicalizeAttrName,
   ensurePcAttrAliases,
   expandCategoryIds,
   seedCategoryAttrSchema,
+  matchAttrMapKey,
   syncCatalogAttributes,
+  migrateDuplicateCategoryAttrs,
+  ensureProductAttrSource,
   attributesFromCatalog,
   buildAttributeList,
   mapRawToCategoryAttrs,
@@ -725,4 +879,6 @@ module.exports = {
   indexSupplierAttributes,
   hydrateProductsRaw,
   PC_ATTR_ALIASES,
+  ATTR_NAME_RENAMES,
+  ATTR_UNITS,
 };

@@ -42,95 +42,6 @@ function firstMapHit(map, ean) {
   return undefined;
 }
 
-// ─── PC COMPONENT ATTRIBUTE DEFINITIONS ───────────────────────────────────────
-
-const PC_ATTR_SCHEMA = {
-  'procesor': [
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Liczba rdzeni', type: 'numeric', unit: null },
-    { name: 'Zintegrowana grafika', type: 'text', unit: null },
-    { name: 'Typ pamieci RAM', type: 'text', unit: null },
-    { name: 'Maks. taktowanie RAM', type: 'numeric', unit: 'MHz' },
-  ],
-  'plyta glowna': [
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'Chipset', type: 'text', unit: null },
-    { name: 'Format', type: 'text', unit: null },
-    { name: 'Typ pamieci RAM', type: 'text', unit: null },
-    { name: 'Sloty RAM', type: 'numeric', unit: null },
-    { name: 'Sloty M.2', type: 'numeric', unit: null },
-    { name: 'WiFi', type: 'text', unit: null },
-  ],
-  'wentylatory do procesor': [
-    { name: 'Typ chłodzenia', type: 'text', unit: null },
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-    { name: 'Głośność', type: 'text', unit: null },
-  ],
-  'chlodzenie': [
-    { name: 'Typ chłodzenia', type: 'text', unit: null },
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-    { name: 'Głośność', type: 'text', unit: null },
-  ],
-  'kuhler': [
-    { name: 'Typ chłodzenia', type: 'text', unit: null },
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Wysokość', type: 'numeric', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'wentylator': [
-    { name: 'Rozmiar', type: 'text', unit: 'mm' },
-    { name: 'Obroty', type: 'numeric', unit: 'RPM' },
-    { name: 'Głośność', type: 'text', unit: 'dB' },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'pamiec ram': [
-    { name: 'Typ', type: 'text', unit: null },
-    { name: 'Pojemnosc', type: 'numeric', unit: 'GB' },
-    { name: 'Taktowanie', type: 'numeric', unit: 'MHz' },
-    { name: 'Liczba kosci', type: 'numeric', unit: null },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'dysk': [
-    { name: 'Typ dysku', type: 'text', unit: null },
-    { name: 'Pojemnosc', type: 'numeric', unit: 'GB' },
-    { name: 'Interfejs', type: 'text', unit: null },
-  ],
-  'karta graficzna': [
-    { name: 'Chip', type: 'text', unit: null },
-    { name: 'VRAM', type: 'numeric', unit: 'GB' },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Dlugosc karty', type: 'numeric', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'zasilacz': [
-    { name: 'Moc', type: 'numeric', unit: 'W' },
-    { name: 'Certyfikacja', type: 'text', unit: null },
-    { name: 'Modularnosc', type: 'text', unit: null },
-  ],
-  'obudowa': [
-    { name: 'Format plyty', type: 'text', unit: null },
-    { name: 'Maks. wys. chlodzenia', type: 'numeric', unit: 'mm' },
-    { name: 'Obsluga AIO', type: 'text', unit: null },
-    { name: 'Maks. dl. karty graficznej', type: 'numeric', unit: 'mm' },
-    { name: 'Kolor', type: 'text', unit: null },
-    { name: 'RGB', type: 'text', unit: null },
-    { name: 'Szyba hartowana', type: 'text', unit: null },
-  ],
-  'system operacyjny': [
-    { name: 'Wersja', type: 'text', unit: null },
-    { name: 'Typ licencji', type: 'text', unit: null },
-  ],
-};
-
-
 function normalizeStr(s) {
   return (s || '').toLowerCase()
     .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
@@ -144,35 +55,16 @@ function normalizeStr(s) {
 router.post('/setup/seed-attributes', (req, res) => {
   try {
     const db = getDb();
+    const catalogSvc = require('../services/catalogService');
     const cats = db.prepare('SELECT id, name FROM product_categories').all();
     const results = [];
 
-    const insertAttr = db.prepare(`
-      INSERT OR IGNORE INTO category_attributes (category_id, attr_name, attr_type, attr_unit, sort_order)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
     const doSeed = db.transaction(() => {
       for (const cat of cats) {
-        const catFold = attrSync.fold(cat.name);
-        let bestKey = null;
-        let bestLen = 0;
-        for (const keyword of Object.keys(PC_ATTR_SCHEMA)) {
-          const fk = attrSync.fold(keyword);
-          if (fk && catFold.includes(fk) && fk.length > bestLen) {
-            bestKey = keyword;
-            bestLen = fk.length;
-          }
-        }
-        if (!bestKey) continue;
-        let added = 0;
-        PC_ATTR_SCHEMA[bestKey].forEach((a, i) => {
-          try {
-            const r = insertAttr.run(cat.id, a.name, a.type, a.unit, i);
-            if (r.changes) added++;
-          } catch (_) {}
-        });
-        if (added > 0) results.push({ category: cat.name, id: cat.id, added, schema: bestKey });
+        const schemaKey = attrSync.matchAttrMapKey(cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+        if (!schemaKey) continue;
+        const added = attrSync.seedCategoryAttrSchema(db, cat.id, cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+        if (added > 0) results.push({ category: cat.name, id: cat.id, added, schema: schemaKey });
       }
     });
 
@@ -317,18 +209,18 @@ router.get('/components/:catId', (req, res) => {
       for (const cat of scopeCats) {
         attrSync.seedCategoryAttrSchema(db, cat.id, cat.name, catalogSvc.CATEGORY_ATTR_MAP);
       }
-    } catch (_) {}
+    } catch (e) {
+      console.warn('[oferter] seed schema:', e.message);
+    }
 
     let where = `cm.category_id IN (${catScope.map(() => '?').join(',')})`;
     const params = [...catScope];
     if (search) { where += ' AND (cm.name LIKE ? OR cm.manufacturer LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
 
-    // Exclude completely dead products (no stock and no price)
-    where += ` AND (
-      sp.stock > 0 
-      OR sp.buy_price > 0 
-      OR (SELECT SUM(stock_quantity) FROM supplier_products sup WHERE ${offerMatchSql('sup')}) > 0 
-      OR (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE ${offerMatchSql('sup2')} AND sup2.price_pln > 0) > 0
+    // Tylko oferty hurtowni z ceną — sama cena Subiekta nie wystarcza
+    where += ` AND EXISTS (
+      SELECT 1 FROM supplier_products sup
+      WHERE ${offerMatchSql('sup')} AND sup.price_pln > 0
     )`;
 
     const products = db.prepare(`
@@ -382,7 +274,9 @@ router.get('/components/:catId', (req, res) => {
     }
 
     const aliasMap = attrSync.loadAliasMaps(db);
-    try { attrSync.hydrateProductsRaw(db, products, aliasMap); } catch (_) {}
+    try { attrSync.hydrateProductsRaw(db, products, aliasMap); } catch (e) {
+      console.warn('[oferter] hydrate raw:', e.message);
+    }
 
     const catAttrDefs = db.prepare(
       `SELECT attr_name, attr_type, attr_unit FROM category_attributes
@@ -512,11 +406,21 @@ router.post('/product-attrs/:id', (req, res) => {
     const { attribute_id, value_text, value_numeric } = req.body;
     if (!attribute_id) return res.status(400).json({ error: 'attribute_id wymagane' });
 
-    db.prepare(`
-      INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
-    `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    attrSync.ensureProductAttrSource(db);
+    try {
+      db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source)
+        VALUES (?, ?, ?, ?, 'manual')
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET
+          value_text=excluded.value_text, value_numeric=excluded.value_numeric, source='manual'
+      `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    } catch (_) {
+      db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
+      `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    }
 
     res.json({ ok: true });
   } catch (err) {
@@ -532,11 +436,22 @@ router.post('/product-attrs/:id/bulk', (req, res) => {
     const { attributes } = req.body; // [{attribute_id, value_text, value_numeric}]
     if (!Array.isArray(attributes)) return res.status(400).json({ error: 'attributes musi byc tablica' });
 
-    const upsert = db.prepare(`
-      INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
-    `);
+    attrSync.ensureProductAttrSource(db);
+    let upsert;
+    try {
+      upsert = db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source)
+        VALUES (?, ?, ?, ?, 'manual')
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET
+          value_text=excluded.value_text, value_numeric=excluded.value_numeric, source='manual'
+      `);
+    } catch (_) {
+      upsert = db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
+      `);
+    }
 
     const doAll = db.transaction(() => {
       for (const a of attributes) {
@@ -751,11 +666,19 @@ router.post('/compatibility', (req, res) => {
     const norm = (s) => (s||'').toString().toLowerCase().trim();
 
     const pickComp = (...keys) => {
+      const folded = keys.map(k => attrSync.fold(k));
+      const specific = folded.filter(k => k.length >= 8);
+      const generic = folded.filter(k => k.length < 8);
+      let best = null, bestScore = 0;
       for (const [name, attrs] of Object.entries(compMap)) {
-        const n = normalizeStr(name);
-        if (keys.some(k => n.includes(attrSync.fold(k)))) return attrs;
+        const n = attrSync.fold(name);
+        if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
+        let score = 0;
+        if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
+        else if (generic.some(k => n.includes(k))) score = 1;
+        if (score > bestScore) { bestScore = score; best = attrs; }
       }
-      return null;
+      return best;
     };
     const attrOf = (obj, ...names) => {
       if (!obj) return null;
@@ -797,7 +720,7 @@ router.post('/compatibility', (req, res) => {
     }
 
     // 3. CPU <-> Chłodzenie (TDP)
-    const cooler = pickComp('chlodzen', 'cooler', 'wentylator');
+    const cooler = pickComp('wentylatory do procesor', 'chlodzenie procesor', 'chlodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chlodzenie wodne', 'chlodzen');
     if (cpu && cooler) {
       const maxTdp = attrOf(cooler, 'Max TDP', 'TDP');
       const cpuTdp = attrOf(cpu, 'TDP');
@@ -883,9 +806,11 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
 
   const db = getDb();
   const products = db.prepare(`
-    SELECT cm.id, cm.name, cm.manufacturer, sp.description
+    SELECT cm.id, cm.name, cm.manufacturer,
+      (SELECT sp.description FROM supplier_products sp
+       WHERE ${offerMatchSql('sp')} AND sp.description IS NOT NULL AND trim(sp.description) != ''
+       LIMIT 1) AS description
     FROM catalog_master cm
-    JOIN supplier_products sp ON sp.ean = cm.canonical_ean
     WHERE cm.category_id = ?
       AND cm.id NOT IN (SELECT catalog_id FROM product_attributes)
   `).all(catId);
@@ -898,7 +823,13 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
       const attrsDef = db.prepare('SELECT id, attr_name, attr_type FROM category_attributes WHERE category_id = ?').all(catId);
       if(!attrsDef.length) { batchStatus[catId].running = false; return; }
 
-      const insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+      attrSync.ensureProductAttrSource(db);
+      let insVal;
+      try {
+        insVal = db.prepare("INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, 'supplier')");
+      } catch (_) {
+        insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+      }
 
       for(const p of products) {
         if(!batchStatus[catId].running) break;
@@ -926,6 +857,8 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby (np. 105). Dla brakujących 
             for(const a of attrsDef) {
               const val = parsed[a.attr_name];
               if(val !== undefined && val !== null) {
+                const existing = db.prepare('SELECT source FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?').get(p.id, a.id);
+                if (existing && existing.source === 'manual') continue;
                 if(a.attr_type === 'numeric') {
                   insVal.run(p.id, a.id, null, parseFloat(val) || null);
                 } else {
@@ -952,7 +885,13 @@ router.post('/product-attrs/extract/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const db = getDb();
-    const p = db.prepare('SELECT cm.id, cm.category_id, cm.name, cm.manufacturer, sp.description FROM catalog_master cm JOIN supplier_products sp ON sp.ean = cm.canonical_ean WHERE cm.id = ?').get(id);
+    const p = db.prepare(`
+      SELECT cm.id, cm.category_id, cm.name, cm.manufacturer,
+        (SELECT sp.description FROM supplier_products sp
+         WHERE ${offerMatchSql('sp')} AND sp.description IS NOT NULL AND trim(sp.description) != ''
+         LIMIT 1) AS description
+      FROM catalog_master cm WHERE cm.id = ?
+    `).get(id);
     if(!p) return res.status(404).json({ error: 'Nie znaleziono produktu' });
 
     const attrsDef = db.prepare('SELECT id, attr_name, attr_type FROM category_attributes WHERE category_id = ?').all(p.category_id);
@@ -976,11 +915,19 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby. Dla brakujących przypisz n
     const cleanJson = reply.replace(/\x60\x60\x60json/g, '').replace(/\x60\x60\x60/g, '').trim();
     const parsed = JSON.parse(cleanJson);
     
-    const insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+    attrSync.ensureProductAttrSource(db);
+    let insVal;
+    try {
+      insVal = db.prepare("INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, 'supplier')");
+    } catch (_) {
+      insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+    }
     db.transaction(() => {
       for(const a of attrsDef) {
         const val = parsed[a.attr_name];
         if(val !== undefined && val !== null) {
+          const existing = db.prepare('SELECT source FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?').get(p.id, a.id);
+          if (existing && existing.source === 'manual') continue;
           if(a.attr_type === 'numeric') {
             insVal.run(p.id, a.id, null, parseFloat(val) || null);
           } else {

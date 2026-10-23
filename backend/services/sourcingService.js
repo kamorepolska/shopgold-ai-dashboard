@@ -135,13 +135,13 @@ function initSourcingSchema(db) {
       price_pln     REAL,
       weight_g      REAL DEFAULT 0,
       availability  TEXT DEFAULT 'unknown',
+      condition     TEXT DEFAULT 'new',
       stock_quantity INTEGER,
       refreshed_at  TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_sp_ean      ON supplier_products(ean);
     CREATE INDEX IF NOT EXISTS idx_sp_supplier ON supplier_products(supplier_id);
     CREATE INDEX IF NOT EXISTS idx_sp_ean_avail ON supplier_products(ean, availability);
-    CREATE INDEX IF NOT EXISTS idx_sp_ean_cond  ON supplier_products(ean, condition);
 
     CREATE TABLE IF NOT EXISTS supplier_files (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -321,11 +321,14 @@ function initSourcingSchema(db) {
     "ALTER TABLE suppliers ADD COLUMN action_api_key TEXT",
     "ALTER TABLE supplier_products ADD COLUMN normalized_ean TEXT",
     "ALTER TABLE subiekt_products ADD COLUMN normalized_ean TEXT",
+    "ALTER TABLE product_attributes ADD COLUMN source TEXT DEFAULT 'supplier'",
   ];
 
   for (const m of migrations) {
     try { db.exec(m); } catch(_) {}
   }
+
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_sp_ean_cond ON supplier_products(ean, condition)"); } catch (_) {}
 
   // Catalog Master table
   db.exec(`
@@ -386,6 +389,7 @@ function initSourcingSchema(db) {
       attribute_id    INTEGER NOT NULL REFERENCES category_attributes(id) ON DELETE CASCADE,
       value_text      TEXT,
       value_numeric   REAL,
+      source          TEXT DEFAULT 'supplier',
       UNIQUE(catalog_id, attribute_id)
     );
     CREATE INDEX IF NOT EXISTS idx_pa_catalog ON product_attributes(catalog_id);
@@ -3844,8 +3848,8 @@ function buildComparison({
     }
     const catMeta = catalogMeta[groupKeyForEan(sub.ean, catalogGroups)];
     if (catMeta) {
-      if (!name) name = catMeta.name;
-      if (!rowMfg) rowMfg = catMeta.manufacturer;
+      if (catMeta.name) name = catMeta.name;
+      if (catMeta.manufacturer) rowMfg = catMeta.manufacturer;
     }
     rowMfg = normalizeManufacturer(rowMfg);
     if (manufacturer && !rowMfg.toLowerCase().includes(manufacturer.toLowerCase())) continue;
@@ -5187,8 +5191,18 @@ function getAttrManagerList(categoryId = null, supplierId = null, onlyAvailable 
   ]);
 
   // Dynamic filter — also catches patterns not covered by exact list
+  let attrSync = null;
+  try { attrSync = require('./catalogAttrSync'); } catch (_) {}
   const _gamBL = (k) => {
+    if (attrSync && attrSync.isJunkAttrName(k)) return true;
     if (_GAM_BL.has(k.toLowerCase())) return true;
+    if (attrSync) {
+      const resolved = attrSync.resolveKey(k, null);
+      if (resolved && !attrSync.isJunkAttrName(resolved)) {
+        const known = attrSync.PC_ATTR_ALIASES.some(([, canon]) => attrSync.fold(canon) === attrSync.fold(resolved));
+        if (known) return false;
+      }
+    }
     if (/^\d+$/.test(k)) return true;              // purely numeric IDs like "13427"
     if (k.includes('?')) return true;              // corrupted encoding
     if (/^[BDEFGRW]\d{3}M$/.test(k)) return true; // warranty codes: F024M, G012M
