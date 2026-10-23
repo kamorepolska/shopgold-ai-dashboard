@@ -29,9 +29,9 @@ temp_also_unzipped/
 *.pdf
 *.csv
 
-# Du¿e feedy XML (limit GitHub 100 MB)
-data/sourcing_uploads/*.xml
-data/idealpc/sourcing_uploads/*.xml
+# Cache feedów hurtowni (XML/CSV/PHP ? nie wrzucaæ cenników do gita)
+data/sourcing_uploads/
+data/idealpc/sourcing_uploads/
 
 # Pliki testowe i skrypty naprawcze
 scratch/
