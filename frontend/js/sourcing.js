@@ -3361,6 +3361,88 @@ ${offers.length?`<table class="compare-table" style="font-size:.82rem">
     }
   }
 
+  async function showCatalogPricesModal(ean, name) {
+    try {
+      const result = await API.get(`/sourcing/catalog/prices/${encodeURIComponent(ean)}`);
+      const prices = result.prices || [];
+      const sub = result.subiekt || null;
+      const bestPrice = prices.find(p => p.price_pln > 0)?.price_pln || null;
+      const subAvailC = sub
+        ? `<span style="color:#10b981;font-weight:600">✅ W ofercie</span>`
+        : `<span style="color:#94a3b8">— Brak w Subiekcie</span>`;
+      const subStockC = sub?.stock ?? null;
+      const subStockHtmlC = subStockC != null
+        ? (subStockC > 10 ? `<span style="color:#10b981">${subStockC} szt</span>`
+          : subStockC > 0 ? `<span style="color:#f59e0b">${subStockC} szt (mało)</span>`
+          : `<span style="color:#ef4444">0 szt (brak)</span>`)
+        : `<span style="color:#94a3b8">—</span>`;
+      const subSellC = sub?.sell_price ?? null;
+      const subBuyC = sub?.buy_price ?? null;
+      const marginC = subSellC != null && bestPrice != null && bestPrice > 0
+        ? ((subSellC - bestPrice) / subSellC * 100).toFixed(1)
+        : null;
+      const subiektSectionC = `
+<div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+  <div style="font-size:.72rem;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0">📦 Nasz Subiekt</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:.82rem">
+    <div><span style="color:var(--text-muted)">Status: </span>${subAvailC}</div>
+    ${subStockC != null ? `<div><span style="color:var(--text-muted)">Stan mag.: </span>${subStockHtmlC}</div>` : ''}
+    ${subSellC != null ? `<div><span style="color:var(--text-muted)">Cena sprzedaży: </span><strong style="color:var(--text-primary)">${fmtPLN(subSellC)}</strong></div>` : ''}
+    ${subBuyC != null ? `<div><span style="color:var(--text-muted)">Cena zakupu: </span><strong>${fmtPLN(subBuyC)}</strong></div>` : ''}
+    ${marginC != null ? `<div><span style="color:var(--text-muted)">Marża: </span><strong style="color:${parseFloat(marginC) > 0 ? '#10b981' : '#ef4444'}">${marginC}%</strong></div>` : ''}
+  </div>
+</div>`;
+      const rows = prices.length ? prices.map((o) => {
+        const isBest = o.price_pln === bestPrice;
+        const qty = o.stock_quantity;
+        const av = o.availability;
+        const avail = av === 'available' || (qty != null && qty > 0)
+          ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
+          : av === 'unavailable'
+            ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
+            : '<span class="avail-badge avail-unk" style="color:#94a3b8">— Brak danych</span>';
+        let stockCell;
+        if (qty != null && qty > 0) {
+          const color = qty > 5 ? '#10b981' : '#f59e0b';
+          stockCell = `<span style="color:${color};font-weight:600">${qty} szt</span>`;
+        } else if (qty === 0 || av === 'unavailable') {
+          stockCell = '<span style="color:#f87171;font-weight:600">0</span>';
+        } else if (av === 'available') {
+          stockCell = '<span style="color:#10b981;font-size:.78rem">dostępny</span>';
+        } else {
+          stockCell = '<span style="color:#94a3b8">—</span>';
+        }
+        return `<tr${isBest ? ' class="best-row"' : ''}>
+          <td>${isBest ? '<strong>' : ''}${escHtml(o.supplier_name)}${isBest ? '</strong>' : ''}</td>
+          <td class="price-cell" style="font-family:monospace;font-weight:600">${o.price_pln ? o.price_pln.toFixed(2) + ' zł' : '—'}</td>
+          <td style="text-align:right">${stockCell}</td>
+          <td>${avail}</td>
+        </tr>`;
+      }).join('')
+      : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert</td></tr>';
+
+      Modal.show({
+        title: `💰 Ceny hurtowni — ${escHtml(name || ean)}`,
+        body: `
+<div style="margin-bottom:12px;font-size:.82rem;color:var(--text-secondary)">
+  EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong>
+</div>
+${subiektSectionC}
+<div style="overflow-x:auto">
+<table class="compare-table" style="min-width:380px">
+  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th style="text-align:right">Magazyn</th><th>Dostępność</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table></div>
+<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
+  Sortowanie: cena rosnąco (najtańsza na górze)
+</div>`,
+        footer: '<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>',
+      });
+    } catch (e) {
+      Toast.error('Błąd: ' + e.message);
+    }
+  }
+
   /* Helper: prosty modal dla zakładek Promo/Brakujące (bez pełnych danych compareData) */
   function showProductModalSimple(ean, rows, nameKey, priceKey, supplierKey) {
     const r = rows.find(x => x.ean === ean);
@@ -4579,7 +4661,7 @@ ${refNote}
       });
 
       document.querySelectorAll('#mis-table .price-clickable[data-ean]').forEach(td => {
-        td.addEventListener('click', () => _showProductDetail(td.dataset.ean));
+        td.addEventListener('click', () => showCatalogPricesModal(td.dataset.ean, td.closest('tr')?.querySelector('.name-dblclick')?.getAttribute('title') || td.dataset.ean));
       });
       document.querySelectorAll('#mis-table .name-dblclick[data-ean]').forEach(td => {
         td.addEventListener('dblclick', () => _showProductDetail(td.dataset.ean));
@@ -4815,79 +4897,6 @@ ${refNote}
       });
 
     } catch(e) { el.innerHTML = `<div class="sourcing-empty"><span class="empty-icon">⚠️</span><h3>Blad</h3><p>${escHtml(e.message)}</p></div>`; }
-  }
-
-  /* â”€â”€ expose public API â”€â”€ */
-  /* ═══════════════════════════════════════════════════════
-     MODAL: Ceny w hurtowniach (klik na cenę)
-  ═══════════════════════════════════════════════════════ */
-  function showSupplierPricesModal(ean, data) {
-    if (!data) return;
-    const row = data.rows.find(r => r.ean === ean);
-    if (!row) return;
-    const { suppliers } = data;
-
-    // Zbierz wszystkie oferty dla EAN
-    const offers = [];
-    for (const s of suppliers) {
-      const sp = row.supplier_prices?.[s.id];
-      if (!sp) continue;
-      offers.push({
-        supplier: s.name,
-        supplier_id: s.id,
-        price: sp.price,
-        orig_price: sp.orig_price,
-        currency: sp.currency || s.currency || 'PLN',
-        availability: sp.availability,
-      });
-    }
-
-    // Sortuj: dostępne najpierw, potem wg ceny ASC
-    offers.sort((a, b) => {
-      const aAvail = a.availability === 'available' ? 0 : 1;
-      const bAvail = b.availability === 'available' ? 0 : 1;
-      if (aAvail !== bAvail) return aAvail - bAvail;
-      return (a.price || 0) - (b.price || 0);
-    });
-
-    const sigMap = {green:'🟢',yellow:'🟡',red:'🔴',none:'—'};
-    const sigTitle = {green:'Opłacalne (Kup taniej)',yellow:'Neutralne (Podobna cena)',red:'Drożej (Nie opłaca się)',none:'Brak analizy'};
-
-    const rows = offers.length ? offers.map((o, i) => {
-      const avail = o.availability === 'available'
-        ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
-        : o.availability === 'unavailable'
-          ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
-          : '<span class="avail-badge avail-unk">âť“ Nieznana</span>';
-      const isBest = o.price === Math.min(...offers.filter(x=>x.availability==='available').map(x=>x.price));
-      const origInfo = o.orig_price && o.currency !== 'PLN'
-        ? `<div style="font-size:.72rem;color:var(--text-muted)">${parseFloat(o.orig_price).toFixed(2)} ${o.currency}</div>` : '';
-      return `<tr${i===0?' class="best-row"':''}>
-        <td>${i===0&&o.availability==='available'?'â­ ':''}${escHtml(o.supplier)}</td>
-        <td class="price-cell">${fmtPLN(o.price)}${origInfo}</td>
-        <td>${avail}</td>
-      </tr>`;
-    }).join('')
-    : `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert dla tego EAN</td></tr>`;
-
-    Modal.show({
-      title: `💰 Oferty hurtowni — ${escHtml(row.name || ean)}`,
-      body: `
-<div style="margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--text-secondary)">
-  <span>EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong></span>
-  <span>Cena zakupu: <strong style="color:var(--text-primary)">${fmtPLN(row.buy_price)}</strong></span>
-  <span>Sygnał: <strong title="${sigTitle[row.signal]||''}">${sigMap[row.signal]||'—'}</strong></span>
-</div>
-<div style="overflow-x:auto">
-<table class="compare-table" style="min-width:340px">
-  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th>Dostępność</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table></div>
-<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
-  Sortowanie: dostępne najpierw → cena rosnąco
-</div>`,
-      footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>`,
-    });
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -5467,7 +5476,7 @@ ${offersHtml}`;
   /* ═══════════════════════════════════════════════════════
      TAB 8 — CATALOG MASTER (zunifikowany katalog)
   ═══════════════════════════════════════════════════════ */
-  let catPage = 1, catSearch = '', catMfg = '', catMfgSearch = '', catSupplier = '', catInSubiekt = '', catCondition = 'new', catAvail = 'available';
+  let catPage = 1, catSearch = '', catMfg = '', catMfgSearch = '', catSupplier = '', catInSubiekt = '', catCondition = '', catAvail = 'available';
   let catSort = 'last_updated', catOrder = 'desc', catLimit = 50;
   let catSelectedSuppliers = []; // multi-checkbox supplier IDs
   let catAttrFilters = {}; // { attrId: value } for dynamic attr filters
@@ -5479,6 +5488,11 @@ ${offersHtml}`;
   let catSelectedIsUnmapped = false; // true = showing unmapped only
   let catTreeSearchVal = '';         // tree search query
   let _catLastRender = null;         // { html, ts } — cached last rendered HTML for instant tab revisit
+
+  function _isRealCatId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0;
+  }
 
   function _syncActiveCatId(id) {
     if (id === '' || id == null) {
@@ -5789,9 +5803,9 @@ ${offersHtml}`;
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#10b981" onclick="SourcingView._batchGenAttrs()" title="Generuj filtry AI">🤖 Filtry</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem" onclick="SourcingView._syncCatalogAttrs()" title="Uzupełnij cechy produktów z hurtowni do katalogu Master">🧩 Cechy z hurtowni</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#f59e0b" onclick="SourcingView._batchNormalize()" title="Normalizuj nazwy AI">📝 Nazwy</button>
-    ${window.catCategoryId ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#8b5cf6" onclick="SourcingView._showNamingSchemaModal(${window.catCategoryId})" title="Schemat nazwy">📐 Schemat</button>` : ''}
+    ${_isRealCatId(window.catCategoryId) ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#8b5cf6" onclick="SourcingView._showNamingSchemaModal(${Number(window.catCategoryId)})" title="Schemat nazwy">📐 Schemat</button>` : ''}
   </div>
-  ${window.catCategoryId ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;border-left:1px solid var(--border);border-radius:0;margin-left:6px;padding-left:12px" onclick="SourcingView._editFilters(${window.catCategoryId})">✏️ Edytuj filtry</button>` : ''}
+  ${_isRealCatId(window.catCategoryId) ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;border-left:1px solid var(--border);border-radius:0;margin-left:6px;padding-left:12px" onclick="SourcingView._editFilters(${Number(window.catCategoryId)})">✏️ Edytuj filtry</button>` : ''}
   <span style="font-size:.82rem;color:var(--text-muted);margin-left:12px">${data.total || 0} wyników | str. ${data.page}/${data.pages || 1}</span>
 </div>
 
@@ -6254,94 +6268,8 @@ ${offersHtml}`;
       });
     });
 
-    // Click on price — show supplier prices modal
     el.querySelectorAll('.cat-price-click').forEach(span => {
-      span.addEventListener('click', async () => {
-        const ean = span.dataset.ean;
-        const name = span.dataset.name;
-        try {
-          const result = await API.get(`/sourcing/catalog/prices/${encodeURIComponent(ean)}`);
-          const prices = result.prices || [];
-          const sub = result.subiekt || null;
-          const bestPrice = prices.find(p => p.price_pln > 0)?.price_pln || null;
-
-          // ── Subiekt section ──────────────────────────────────────────
-          const subAvailC = sub
-            ? `<span style="color:#10b981;font-weight:600">✅ W ofercie</span>`
-            : `<span style="color:#94a3b8">— Brak w Subiekcie</span>`;
-          const subStockC = sub?.stock ?? null;
-          const subStockHtmlC = subStockC != null
-            ? (subStockC > 10 ? `<span style="color:#10b981">${subStockC} szt</span>`
-              : subStockC > 0 ? `<span style="color:#f59e0b">${subStockC} szt (mało)</span>`
-              : `<span style="color:#ef4444">0 szt (brak)</span>`)
-            : `<span style="color:#94a3b8">—</span>`;
-          const subSellC = sub?.sell_price ?? null;
-          const subBuyC = sub?.buy_price ?? null;
-          const marginC = subSellC != null && bestPrice != null && bestPrice > 0
-            ? ((subSellC - bestPrice) / subSellC * 100).toFixed(1)
-            : null;
-          const subiektSectionC = `
-<div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
-  <div style="font-size:.72rem;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0">📦 Nasz Subiekt</div>
-  <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:.82rem">
-    <div><span style="color:var(--text-muted)">Status: </span>${subAvailC}</div>
-    ${subStockC != null ? `<div><span style="color:var(--text-muted)">Stan mag.: </span>${subStockHtmlC}</div>` : ''}
-    ${subSellC != null ? `<div><span style="color:var(--text-muted)">Cena sprzedaży: </span><strong style="color:var(--text-primary)">${fmtPLN(subSellC)}</strong></div>` : ''}
-    ${subBuyC != null ? `<div><span style="color:var(--text-muted)">Cena zakupu: </span><strong>${fmtPLN(subBuyC)}</strong></div>` : ''}
-    ${marginC != null ? `<div><span style="color:var(--text-muted)">Marża: </span><strong style="color:${parseFloat(marginC) > 0 ? '#10b981' : '#ef4444'}">${marginC}%</strong></div>` : ''}
-  </div>
-</div>`;
-
-          const rows = prices.length ? prices.map((o, i) => {
-            const isBest = o.price_pln === bestPrice;
-            const qty = o.stock_quantity;
-            const av = o.availability;
-            // Availability badge
-            const avail = av === 'available' || (qty != null && qty > 0)
-              ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
-              : av === 'unavailable'
-                ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
-                : '<span class="avail-badge avail-unk" style="color:#94a3b8">— Brak danych</span>';
-            // Stock number
-            let stockCell;
-            if (qty != null && qty > 0) {
-              const color = qty > 5 ? '#10b981' : '#f59e0b';
-              stockCell = `<span style="color:${color};font-weight:600">${qty} szt</span>`;
-            } else if (qty === 0 || av === 'unavailable') {
-              stockCell = '<span style="color:#f87171;font-weight:600">0</span>';
-            } else if (av === 'available') {
-              stockCell = '<span style="color:#10b981;font-size:.78rem">dostępny</span>';
-            } else {
-              stockCell = '<span style="color:#94a3b8">—</span>';
-            }
-            return `<tr${isBest ? ' class="best-row"' : ''}>
-              <td>${isBest ? '<strong>' : ''}${escHtml(o.supplier_name)}${isBest ? '</strong>' : ''}</td>
-              <td class="price-cell" style="font-family:monospace;font-weight:600">${o.price_pln ? o.price_pln.toFixed(2) + ' zł' : '—'}</td>
-              <td style="text-align:right">${stockCell}</td>
-              <td>${avail}</td>
-            </tr>`;
-          }).join('')
-          : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert</td></tr>';
-
-          Modal.show({
-            title: `💰 Ceny hurtowni — ${escHtml(name || ean)}`,
-            body: `
-<div style="margin-bottom:12px;font-size:.82rem;color:var(--text-secondary)">
-  EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong>
-</div>
-${subiektSectionC}
-<div style="overflow-x:auto">
-<table class="compare-table" style="min-width:380px">
-  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th style="text-align:right">Magazyn</th><th>Dostępność</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table></div>
-<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
-  Sortowanie: cena rosnąco (najtańsza na górze)
-</div>`,
-            footer: '<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>',
-          });
-        } catch(e) { Toast.error('Błąd: ' + e.message); }
-      });
+      span.addEventListener('click', () => showCatalogPricesModal(span.dataset.ean, span.dataset.name));
     });
 
 
@@ -8053,7 +7981,11 @@ ${subiektSectionC}
   }
 
   async function _showNamingSchemaModal(categoryId) {
-    if (!categoryId) return;
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     try {
       const schema = await API.get(`/sourcing/catalog/naming-schema/${categoryId}`);
       const params = schema.params || [];
@@ -8467,6 +8399,11 @@ ${subiektSectionC}
 
   // ─── Katalog Master Full: Filter Editor Modal ───────────────────────
   async function _editFilters(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     try {
       const allAttrs = await API.get(`/sourcing/catalog/categories/${categoryId}/all-attributes`);
 
@@ -8500,6 +8437,11 @@ ${subiektSectionC}
   }
 
   async function _saveFilters(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     const rows = document.querySelectorAll('.filter-editor-row');
     const filterAttrIds = [];
     for (const row of rows) {
@@ -8507,11 +8449,14 @@ ${subiektSectionC}
       const unitInput = row.querySelector('.filter-editor-unit-input');
       const attrId = parseInt(row.dataset.attrId);
       if (cb && cb.checked) filterAttrIds.push(attrId);
-      // Save unit changes
       if (unitInput) {
         const origUnit = unitInput.defaultValue || '';
         if (unitInput.value !== origUnit) {
-          try { await API.patch(`/sourcing/catalog/categories/attributes/${attrId}`, { attr_unit: unitInput.value || null }); } catch(_) {}
+          try {
+            await API.patch(`/sourcing/catalog/categories/attributes/${attrId}`, { attr_unit: unitInput.value || null });
+          } catch (e) {
+            Toast.error('Nie zapisano jednostki: ' + e.message);
+          }
         }
       }
     }
@@ -8525,6 +8470,11 @@ ${subiektSectionC}
   }
 
   async function _addNewAttr(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     const nameInput = document.getElementById('fe-new-name');
     const unitInput = document.getElementById('fe-new-unit');
     if (!nameInput || !nameInput.value.trim()) { Toast.error('Podaj nazwę parametru'); return; }
@@ -9689,6 +9639,8 @@ ${subiektSectionC}
     _saveInlineMfgCode,
     _editFilters,
     _saveFilters,
+    _addNewAttr,
+    _isRealCatId,
     _deleteAttr,
     _catSelectAllSup,
     _setAbSupplier,

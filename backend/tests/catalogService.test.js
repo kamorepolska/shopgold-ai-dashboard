@@ -17,7 +17,8 @@ function makeDb() {
     );
     CREATE TABLE product_categories (
       id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, slug TEXT, parent_id INTEGER,
-      is_ab_category INTEGER DEFAULT 0, product_count INTEGER DEFAULT 0, ab_category_id INTEGER
+      is_ab_category INTEGER DEFAULT 0, product_count INTEGER DEFAULT 0, ab_category_id INTEGER,
+      source_supplier_id INTEGER
     );
     CREATE TABLE category_aliases (raw_name TEXT UNIQUE, category_id INTEGER);
     CREATE TABLE category_attributes (
@@ -131,9 +132,46 @@ function testSearchCatalogTreatsNullConditionAsNew() {
   db.close();
 }
 
+function testMarkSupplierAsAbDoesNotWipeParentId() {
+  const db = makeDb();
+  db.prepare('INSERT INTO suppliers (id, name) VALUES (1, ?)').run('Action');
+  db.prepare(`INSERT INTO product_categories (id, name, slug, parent_id, is_ab_category) VALUES (1, 'Komponenty', 'komponenty', NULL, 0)`).run();
+  db.prepare(`INSERT INTO product_categories (id, name, slug, parent_id, is_ab_category) VALUES (2, 'Inna galaz', 'inna', 1, 0)`).run();
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, category)
+    VALUES (1, '5901234123457', '5901234123457', 'AMD Ryzen', 'Komponenty > Procesory')
+  `).run();
+  const result = catalogSvc.markSupplierAsAb(db, 1);
+  assert.ok(result.marked >= 1);
+  const row = db.prepare('SELECT parent_id FROM product_categories WHERE id = 2').get();
+  assert.strictEqual(row.parent_id, 1, 'unrelated parent_id must survive markSupplierAsAb');
+  const proc = db.prepare("SELECT parent_id, is_ab_category, source_supplier_id FROM product_categories WHERE name = 'Procesory'").get();
+  assert.ok(proc, 'leaf category must be created');
+  assert.ok(proc.parent_id, 'Procesory must sit under Komponenty');
+  assert.strictEqual(proc.is_ab_category, 1);
+  assert.strictEqual(proc.source_supplier_id, 1);
+  db.close();
+}
+
+function testMarkSupplierAsAbSkipsNumericIds() {
+  const db = makeDb();
+  db.prepare('INSERT INTO suppliers (id, name) VALUES (1, ?)').run('Impakt');
+  db.prepare(`
+    INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, category)
+    VALUES (1, '5901234123457', '5901234123457', 'Item', '184|12')
+  `).run();
+  const result = catalogSvc.markSupplierAsAb(db, 1);
+  assert.strictEqual(result.marked, 0);
+  const junk = db.prepare("SELECT COUNT(*) AS c FROM product_categories WHERE name LIKE '%|%' OR name GLOB '[0-9]*'").get();
+  assert.strictEqual(junk.c, 0, 'bare Impakt ids must not become categories');
+  db.close();
+}
+
 testGenerateDoesNotWipeExistingCategory();
 testGenerateAssignsByNormalizedEan();
 testGenerateDoesNotWipeParentId();
 testGenerateDoesNotMergeSiblingCategories();
 testSearchCatalogTreatsNullConditionAsNew();
+testMarkSupplierAsAbDoesNotWipeParentId();
+testMarkSupplierAsAbSkipsNumericIds();
 console.log('catalogService tests: ok');

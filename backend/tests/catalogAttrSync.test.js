@@ -248,5 +248,14 @@ testMatchAttrMapKeyPrefersCpuCooler();
 testActionSectionKeysResolveToCanonical();
 testFlattenNestedParameters();
 testSeedPrefersCpuCoolerSchema();
+function testLedStripDoesNotStealMonitorSchema() {
+  const catalogSvc = require('../services/catalogService');
+  const key = attrSync.matchAttrMapKey('Taśmy LED RGB', catalogSvc.CATEGORY_ATTR_MAP);
+  assert.notStrictEqual(key, 'led', 'bare led keyword must not match lighting categories');
+  const monitorKey = attrSync.matchAttrMapKey('Monitory LED 27"', catalogSvc.CATEGORY_ATTR_MAP);
+  assert.ok(monitorKey === 'monitor' || monitorKey === 'lcd', monitorKey);
+}
+
 testHydrateActionKeysIntoCatalog();
+testLedStripDoesNotStealMonitorSchema();
 console.log('catalogAttrSync tests: ok');

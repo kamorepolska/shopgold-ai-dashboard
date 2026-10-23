@@ -274,7 +274,6 @@ const CATEGORY_ATTR_MAP = {
   'stacja robocza': ['Procesor', 'RAM', 'Dysk', 'GPU'],
   // Displays
   'monitor': ['Przekątna', 'Rozdzielczość', 'Typ matrycy', 'Odświeżanie', 'Złącza'],
-  'led': ['Przekątna', 'Rozdzielczość', 'Typ matrycy', 'Odświeżanie', 'Złącza'],
   'lcd': ['Przekątna', 'Rozdzielczość', 'Typ matrycy', 'Odświeżanie'],
   'telewiz': ['Przekątna', 'Rozdzielczość', 'Smart TV', 'HDR'],
   // GPUs
@@ -1617,78 +1616,86 @@ function getCategoryTree(db) {
  * Buduje pełną hierarchię na podstawie ścieżek z supplier_products.category.
  */
 function markSupplierAsAb(db, supplierId) {
-  const fs = require('fs');
-  fs.appendFileSync('mark_ab_debug.log', `[${new Date().toISOString()}] markSupplierAsAb called for supplierId: ${supplierId}\n`);
-  
-  // Clear previous AB marks
-  db.prepare('UPDATE product_categories SET is_ab_category = 0, parent_id = NULL').run();
+  const sid = parseInt(supplierId, 10);
+  if (!Number.isFinite(sid) || sid <= 0) return { marked: 0 };
 
-  // Get all raw categories from this supplier's products
+  function makeSlug(str) {
+    return (str || '').toLowerCase()
+      .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
+      .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
+      .replace(/ś/g,'s').replace(/ż/g,'z').replace(/ź/g,'z')
+      .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  function norm(raw) {
+    if (!raw) return null;
+    const s = String(raw).trim();
+    if (!s || s.startsWith('<') || s.length < 2) return null;
+    if (/^\d+\|\d+/.test(s) || /^\d+$/.test(s)) return null;
+    if (/kazdy kategor/i.test(s) || (/^\d+\s+\S/.test(s) && s.length < 48)) return null;
+    return s.charAt(0).toUpperCase() + s.slice(1);
+  }
+
+  db.prepare('UPDATE product_categories SET is_ab_category = 0').run();
+
   const supplierCats = db.prepare(`
     SELECT DISTINCT sp.category
     FROM supplier_products sp
-    WHERE sp.supplier_id = ? AND sp.category IS NOT NULL AND sp.category != ''
-  `).all(supplierId);
+    WHERE sp.supplier_id = ? AND sp.category IS NOT NULL AND trim(sp.category) != ''
+      AND sp.category NOT LIKE '<%' AND sp.category NOT LIKE '%|%'
+  `).all(sid);
 
-  fs.appendFileSync('mark_ab_debug.log', `[${new Date().toISOString()}] Found ${supplierCats.length} distinct categories for supplier\n`);
-
+  const idMap = new Map();
   let marked = 0;
+
   for (const row of supplierCats) {
-    if (!row.category) continue;
-    
-    // Split by " > " or "/"
-    const parts = row.category.split(/[/|>\\]+/).map(p => p.trim()).filter(Boolean);
+    const parts = String(row.category || '').split(/\s*[>\/\\|:]\s*/).map(norm).filter(Boolean);
     if (!parts.length) continue;
 
-    let currentParentId = null;
-    let leafCatId = null;
-
-    try {
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        // Preserve Polish chars — only uppercase first letter, keep rest as-is
-        const name = part.charAt(0).toUpperCase() + part.slice(1);
-        const slug = part.toLowerCase()
-          .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e')
-          .replace(/ł/g,'l').replace(/ń/g,'n').replace(/ó/g,'o')
-          .replace(/ś/g,'s').replace(/ż/g,'z').replace(/ź/g,'z')
-          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-
-        let existing = db.prepare('SELECT id, parent_id FROM product_categories WHERE LOWER(name) = LOWER(?)').get(name);
-        let catId;
-        if (existing) {
-          catId = existing.id;
-          if (currentParentId && existing.parent_id !== currentParentId) {
-            db.prepare('UPDATE product_categories SET parent_id = ? WHERE id = ?').run(currentParentId, catId);
-          }
-        } else {
-          try {
-            const res = db.prepare('INSERT INTO product_categories (name, slug, parent_id) VALUES (?, ?, ?)').run(name, slug, currentParentId);
-            catId = Number(res.lastInsertRowid);
-          } catch(e) {
-            const ex = db.prepare('SELECT id, parent_id FROM product_categories WHERE LOWER(name) = LOWER(?)').get(name);
-            if (ex) {
-               catId = ex.id;
-               if (currentParentId && ex.parent_id !== currentParentId) {
-                  db.prepare('UPDATE product_categories SET parent_id = ? WHERE id = ?').run(currentParentId, catId);
-               }
-            } else {
-               throw e;
-            }
-          }
-        }
-        
-        db.prepare('UPDATE product_categories SET is_ab_category = 1, source_supplier_id = ? WHERE id = ?').run(supplierId, catId);
-        currentParentId = catId;
-        leafCatId = catId;
+    let parentId = null;
+    let leafId = null;
+    for (const name of parts) {
+      const mapKey = `${parentId}|${name.toLowerCase()}`;
+      if (idMap.has(mapKey)) {
+        parentId = idMap.get(mapKey);
+        leafId = parentId;
+        continue;
       }
-      if (leafCatId) marked++;
-    } catch (e) {
-      fs.appendFileSync('mark_ab_debug.log', `[${new Date().toISOString()}] ERROR processing category "${row.category}": ${e.message}\n${e.stack}\n`);
+
+      const existing = parentId == null
+        ? db.prepare('SELECT id, parent_id FROM product_categories WHERE lower(name)=lower(?) AND parent_id IS NULL LIMIT 1').get(name)
+        : db.prepare('SELECT id, parent_id FROM product_categories WHERE lower(name)=lower(?) AND parent_id = ? LIMIT 1').get(name, parentId);
+
+      let catId = existing ? existing.id : null;
+      if (!catId) {
+        try {
+          const res = db.prepare(
+            'INSERT INTO product_categories (name, slug, parent_id, is_ab_category) VALUES (?, ?, ?, 1)'
+          ).run(name, makeSlug(name), parentId);
+          catId = Number(res.lastInsertRowid);
+        } catch (_) {
+          const ex = parentId == null
+            ? db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id IS NULL LIMIT 1').get(name)
+            : db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id = ? LIMIT 1').get(name, parentId);
+          catId = ex ? ex.id : null;
+        }
+      }
+      if (!catId) continue;
+
+      db.prepare('UPDATE product_categories SET is_ab_category = 1, source_supplier_id = ? WHERE id = ?').run(sid, catId);
+      if (parentId != null) {
+        const cur = db.prepare('SELECT parent_id FROM product_categories WHERE id = ?').get(catId);
+        if (cur && cur.parent_id == null) {
+          db.prepare('UPDATE product_categories SET parent_id = ? WHERE id = ?').run(parentId, catId);
+        }
+      }
+      idMap.set(mapKey, catId);
+      parentId = catId;
+      leafId = catId;
     }
+    if (leafId) marked++;
   }
-  
-  fs.appendFileSync('mark_ab_debug.log', `[${new Date().toISOString()}] Marked ${marked} categories\n`);
+
   return { marked };
 }
 
@@ -3501,7 +3508,8 @@ function generateAbCategoryTree(db) {
     if (!raw) return null;
     const s = String(raw).trim();
     if (!s || s.startsWith('<') || s.length < 2) return null;
-    if (/^\d+\|\d+/.test(s)) return null;
+    if (/^\d+\|\d+/.test(s) || /^\d+$/.test(s)) return null;
+    if (/kazdy kategor/i.test(s) || /^\d+\s+\S/.test(s) && s.length < 48) return null;
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
 
@@ -3528,10 +3536,17 @@ function generateAbCategoryTree(db) {
     db.prepare('UPDATE product_categories SET is_ab_category = 0').run();
     db.prepare(`DELETE FROM product_categories WHERE
       name LIKE '%:%' OR name LIKE '%>%' OR name LIKE '%|%'
-      OR name LIKE '<%' OR length(trim(name)) < 2`).run();
+      OR name LIKE '<%' OR length(trim(name)) < 2
+      OR lower(name) LIKE '%kazdy kategor%'`).run();
   } catch (_) {}
 
-  const abSupplier = db.prepare(`
+  const markedAb = db.prepare(`
+    SELECT source_supplier_id as supplier_id
+    FROM product_categories
+    WHERE is_ab_category = 1 AND source_supplier_id IS NOT NULL
+    GROUP BY source_supplier_id ORDER BY COUNT(*) DESC LIMIT 1
+  `).get();
+  const abSupplier = markedAb || db.prepare(`
     SELECT supplier_id, COUNT(DISTINCT category) as cnt
     FROM supplier_products
     WHERE category IS NOT NULL AND trim(category) != '' AND category NOT LIKE '<%'
@@ -3604,15 +3619,21 @@ function generateAbCategoryTree(db) {
           catId = Number(r.lastInsertRowid);
           created++;
         } catch (e) {
-          const ex = db.prepare(
-            'SELECT id FROM product_categories WHERE lower(name)=lower(?) LIMIT 1'
-          ).get(name);
+          const ex = parentId == null
+            ? db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id IS NULL LIMIT 1').get(name)
+            : db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id = ? LIMIT 1').get(name, parentId);
           catId = ex ? ex.id : null;
         }
       }
 
       if (catId) {
-        db.prepare('UPDATE product_categories SET is_ab_category=1, parent_id=? WHERE id=?').run(parentId, catId);
+        db.prepare('UPDATE product_categories SET is_ab_category=1 WHERE id=?').run(catId);
+        if (parentId != null) {
+          const cur = db.prepare('SELECT parent_id FROM product_categories WHERE id=?').get(catId);
+          if (cur && cur.parent_id == null) {
+            db.prepare('UPDATE product_categories SET parent_id=? WHERE id=?').run(parentId, catId);
+          }
+        }
         idMap.set(mapKey, catId);
         parentId = catId;
       }

@@ -763,6 +763,12 @@ router.patch('/suppliers/:id/files/:fid/schedule', (req, res) => {
   try {
     const fid = parseInt(req.params.fid);
     const { enabled, cron } = req.body;
+    if (cron) {
+      const { isValidCron } = require('../services/schedulerService');
+      if (!isValidCron(cron)) {
+        return res.status(400).json({ error: `Nieprawidłowe wyrażenie CRON: "${cron}"` });
+      }
+    }
     svc.getDb().prepare("UPDATE supplier_files SET schedule_enabled = ?, schedule_cron = ? WHERE id = ?").run(enabled ? 1 : 0, cron || null, fid);
     try {
       require('../services/schedulerService').reloadFileSchedule(fid);
@@ -1480,6 +1486,12 @@ router.patch('/catalog/categories/:id', (req, res) => {
     const { name } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nazwa jest wymagana' });
     const trimmed = name.trim();
+    const current = db.prepare('SELECT parent_id FROM product_categories WHERE id = ?').get(id);
+    if (!current) return res.status(404).json({ error: 'Kategoria nie znaleziona' });
+    const clash = current.parent_id == null
+      ? db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id IS NULL AND id != ?').get(trimmed, id)
+      : db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id = ? AND id != ?').get(trimmed, current.parent_id, id);
+    if (clash) return res.status(409).json({ error: `Kategoria „${trimmed}” już istnieje na tym poziomie drzewa` });
     db.prepare('UPDATE product_categories SET name = ? WHERE id = ?').run(trimmed, id);
     // Sync catalog_master category_name where this category is used
     db.prepare("UPDATE catalog_master SET category_name = ? WHERE category_id = ?").run(trimmed, id);
@@ -1761,6 +1773,7 @@ router.get('/suppliers/:id/raw-categories', (req, res) => {
 router.post('/catalog/generate-categories', (req, res) => {
   try {
     const result = catalogSvc.generateAbCategoryTree(svc.getDb());
+    clearCache();
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1785,6 +1798,7 @@ router.post('/catalog/mark-ab-supplier', (req, res) => {
     const { supplierId } = req.body;
     if (!supplierId) return res.status(400).json({ error: 'Brak supplierId' });
     const result = catalogSvc.markSupplierAsAb(svc.getDb(), parseInt(supplierId));
+    clearCache();
     res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1969,13 +1983,6 @@ router.get('/catalog/categories/:id/attributes', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PATCH /api/sourcing/catalog/categories/attributes/:id — toggle visibility
-router.patch('/catalog/categories/attributes/:id', (req, res) => {
-  try {
-    const visible = req.body.visible !== undefined ? req.body.visible : true;
-    res.json(catalogSvc.toggleCategoryAttribute(svc.getDb(), parseInt(req.params.id), visible));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 // POST /api/sourcing/catalog/categories/batch-generate — generate for ALL categories
 router.post('/catalog/categories/batch-generate', async (req, res) => {

@@ -22,7 +22,9 @@ app.post('/api/generate-categories', (req, res) => {
     const svc = require('./services/sourcingService');
     const catalogSvc = require('./services/catalogService');
     const db = svc.getDb();
-    return res.json(catalogSvc.generateAbCategoryTree(db));
+    const result = catalogSvc.generateAbCategoryTree(db);
+    try { require('./routes/sourcing')._clearSourcingCache(); } catch (_) {}
+    return res.json(result);
   } catch (e) { res.status(500).json({ error: e.message, stack: e.stack }); }
 });
 

@@ -50,6 +50,43 @@ function normalizeStr(s) {
     .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ä/g,'a').replace(/ß/g,'ss');
 }
 
+function isPcComponentName(name) {
+  const n = normalizeStr(name);
+  if (/alarm|pamieci masow|masow|karta pamiec|kart pamiec|obudow.{0,16}dysk|pendrive|flash|czytnik|tasm.?led|oswietl/.test(n)) return false;
+  return [
+    'procesor', 'plyt', 'chlodzen', 'wentylator', 'cooler', 'kuhler',
+    'pamiec ram', 'pamieci ram', 'dimm', 'arbeitsspeicher',
+    'dysk', 'ssd', 'hdd', 'nvme',
+    'karta graficzn', 'karty graficzn', 'gpu', 'grafikkarten',
+    'zasilacz', 'netzteil',
+    'obudow', 'gehause',
+    'system operac', 'operating system',
+    'cpu', 'mainboard', 'motherboard'
+  ].some(k => n.includes(k));
+}
+
+function pickComponentAttrs(compMap, keys) {
+  const folded = (keys || []).map(k => attrSync.fold(k));
+  const lookingRam = folded.some(k => k.includes('pamiec') || k === 'ram' || k.includes('dimm'));
+  const lookingMb = folded.some(k => k.includes('plyt') || k.includes('mainboard') || k.includes('motherboard'));
+  const lookingCase = folded.some(k => k.includes('obudow') || k === 'case' || k.includes('gehause'));
+  const specific = folded.filter(k => k.length >= 8);
+  const generic = folded.filter(k => k.length < 8);
+  let best = null, bestScore = 0;
+  for (const [name, attrs] of Object.entries(compMap || {})) {
+    const n = attrSync.fold(name);
+    if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
+    if (lookingRam && /masow|flash|pendrive|czytnik/.test(n)) continue;
+    if (lookingMb && /dysk|hdd|ssd|nas/.test(n) && !/glown/.test(n)) continue;
+    if (lookingCase && /dysk|hdd|ssd|nas|zewnetrz/.test(n)) continue;
+    let score = 0;
+    if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
+    else if (generic.some(k => n.includes(k))) score = 1;
+    if (score > bestScore) { bestScore = score; best = attrs; }
+  }
+  return best;
+}
+
 // POST /api/oferter/setup/seed-attributes
 // Seeds category_attributes for all PC component categories found in product_categories
 router.post('/setup/seed-attributes', (req, res) => {
@@ -103,10 +140,7 @@ router.get('/setup/status', (req, res) => {
       ORDER BY pc.name
     `).all();
 
-    const pcCats = cats.filter(c => {
-      const n = normalizeStr(c.name);
-      return ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => n.includes(k));
-    });
+    const pcCats = cats.filter(c => isPcComponentName(c.name));
 
     res.json({ ok: true, pc_categories: pcCats, total: pcCats.length });
   } catch (err) {
@@ -128,7 +162,7 @@ router.get('/setup/categories', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: isPcComponentName(c.name),
     }));
 
     res.json({ ok: true, categories: result });
@@ -328,8 +362,7 @@ router.get('/components/:catId', (req, res) => {
       .map(p => {
         const suppliers = firstMapHit(suppliersMap, p.canonical_ean) || [];
 
-        // Pomiń produkty bez żadnego dostawcy z ceną > 0
-        if (suppliers.length === 0) return null;
+        if (suppliers.length === 0 && !(p.effective_buy_price > 0 || p.best_supplier_price > 0)) return null;
 
         // Oblicz effective_buy_price i supplier_stock
         const cheapestInStock = suppliers.find(s => (s.stock_quantity || 0) > 0);
@@ -484,7 +517,7 @@ router.get('/setup/coverage', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'wentylator', 'cooler', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: isPcComponentName(c.name),
       coverage_pct: c.product_count > 0 ? Math.round((c.products_with_attrs / c.product_count) * 100) : 0,
     }));
 
@@ -566,6 +599,8 @@ router.put('/offers/:id', (req, res) => {
       discount_pct, status, variant_label
     } = req.body;
 
+    const existing = db.prepare('SELECT * FROM oferter_quotes WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Oferta nie znaleziona' });
     db.prepare(`
       UPDATE oferter_quotes SET
         title = ?, client_name = ?, client_email = ?, client_phone = ?, client_company = ?,
@@ -574,14 +609,24 @@ router.put('/offers/:id', (req, res) => {
         discount_pct = ?, status = ?, variant_label = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
-      title, client_name, client_email, client_phone, client_company,
-      notes_client, notes_internal,
-      preferences ? JSON.stringify(preferences) : null,
-      components ? JSON.stringify(components) : null,
-      services ? JSON.stringify(services) : null,
-      skipped_components ? JSON.stringify(skipped_components) : null,
-      total_buy_price || 0, margin_value || 0, discount_value || 0,
-      discount_pct || 0, status || 'draft', variant_label, id
+      title ?? existing.title,
+      client_name ?? existing.client_name,
+      client_email ?? existing.client_email,
+      client_phone ?? existing.client_phone,
+      client_company ?? existing.client_company,
+      notes_client ?? existing.notes_client,
+      notes_internal ?? existing.notes_internal,
+      preferences ? JSON.stringify(preferences) : existing.preferences,
+      components ? JSON.stringify(components) : existing.components,
+      services ? JSON.stringify(services) : existing.services,
+      skipped_components ? JSON.stringify(skipped_components) : existing.skipped_components,
+      total_buy_price != null ? total_buy_price : existing.total_buy_price,
+      margin_value != null ? margin_value : existing.margin_value,
+      discount_value != null ? discount_value : existing.discount_value,
+      discount_pct != null ? discount_pct : existing.discount_pct,
+      status || existing.status || 'draft',
+      variant_label ?? existing.variant_label,
+      id
     );
 
     res.json({ ok: true });
@@ -607,7 +652,7 @@ router.delete('/offers/:id', (req, res) => {
 router.get('/services', (req, res) => {
   try {
     const db = getDb();
-    const services = db.prepare(`SELECT * FROM oferter_services ORDER BY name`).all();
+    const services = db.prepare(`SELECT * FROM oferter_services WHERE COALESCE(is_active, 1) = 1 ORDER BY name`).all();
     res.json({ ok: true, services });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -698,23 +743,7 @@ router.post('/compatibility', (req, res) => {
       return best ? best.v : null;
     };
 
-    const pickComp = (...keys) => {
-      const folded = keys.map(k => attrSync.fold(k));
-      const lookingRam = folded.some(k => k.includes('pamiec') || k === 'ram' || k.includes('dimm'));
-      const specific = folded.filter(k => k.length >= 8);
-      const generic = folded.filter(k => k.length < 8);
-      let best = null, bestScore = 0;
-      for (const [name, attrs] of Object.entries(compMap)) {
-        const n = attrSync.fold(name);
-        if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
-        if (lookingRam && /masow|flash|pendrive|czytnik/.test(n)) continue;
-        let score = 0;
-        if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
-        else if (generic.some(k => n.includes(k))) score = 1;
-        if (score > bestScore) { bestScore = score; best = attrs; }
-      }
-      return best;
-    };
+    const pickComp = (...keys) => pickComponentAttrs(compMap, keys);
     const attrOf = (obj, ...names) => {
       if (!obj) return null;
       for (const n of names) {
@@ -727,11 +756,11 @@ router.post('/compatibility', (req, res) => {
 
     // 1. Zgodnosc CPU <-> Plyta
     const cpu = pickComp('procesor', 'cpu');
-    const mb = pickComp('plyta', 'mainboard', 'motherboard');
+    const mb = pickComp('plyty glowne', 'plyta glowna', 'mainboard', 'motherboard', 'plyty', 'plyta');
     if (cpu && mb) {
       const cpuSock = attrOf(cpu, 'Socket');
       const mbSock = attrOf(mb, 'Socket');
-      if (cpuSock && mbSock && compactToken(cpuSock) && compactToken(mbSock) && compactToken(cpuSock) !== compactToken(mbSock)) {
+      if (cpuSock && mbSock && !socketsCompatible(mbSock, cpuSock) && !socketsCompatible(cpuSock, mbSock)) {
         isValid = false;
         messages.push({ type: 'error', text: `Niezgodny Socket! Procesor wymaga ${cpuSock}, a wybrana płyta posiada ${mbSock}.` });
       }
@@ -771,7 +800,7 @@ router.post('/compatibility', (req, res) => {
     }
 
     // 4. Płyta <-> Obudowa
-    const casePc = pickComp('obudow', 'case');
+    const casePc = pickComp('obudowy komputerowe', 'obudowy pc', 'gehause', 'obudow', 'case');
     if (mb && casePc) {
       const caseFmt = attrOf(casePc, 'Format płyty', 'Format');
       const mbFmt = attrOf(mb, 'Format', 'Format płyty');
@@ -842,13 +871,16 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
   }
 
   const db = getDb();
+  const scopeIds = attrSync.expandCategoryIds(db, [catId]);
+  const catScope = scopeIds.length ? scopeIds : [catId];
+  const ph = catScope.map(() => '?').join(',');
   const products = db.prepare(`
     SELECT cm.id, cm.name, cm.manufacturer,
       (SELECT sp.description FROM supplier_products sp
        WHERE ${offerMatchSql('sp')} AND sp.description IS NOT NULL AND trim(sp.description) != ''
        LIMIT 1) AS description
     FROM catalog_master cm
-    WHERE cm.category_id = ?
+    WHERE cm.category_id IN (${ph})
       AND (
         SELECT COUNT(*) FROM category_attributes ca WHERE ca.category_id = ?
       ) > (
@@ -857,7 +889,7 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
         JOIN category_attributes ca ON ca.id = pa.attribute_id AND ca.category_id = ?
         WHERE pa.catalog_id = cm.id
       )
-  `).all(catId, catId, catId);
+  `).all(...catScope, catId, catId);
 
   batchStatus[catId] = { running: true, total: products.length, done: 0 };
   res.json({ ok: true, message: `Uruchomiono zadanie w tle. Do pobrania: ${products.length} produktów.` });
@@ -987,4 +1019,6 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby. Dla brakujących przypisz n
   }
 });
 
+router.isPcComponentName = isPcComponentName;
+router.pickComponentAttrs = pickComponentAttrs;
 module.exports = router;

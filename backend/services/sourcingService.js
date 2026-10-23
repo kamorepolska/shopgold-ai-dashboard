@@ -70,6 +70,46 @@ function backfillNormalizedEans(db) {
   } catch (_) {}
 }
 
+function migrateProductCategoriesParentNameUnique(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='product_categories'"
+    ).get();
+    if (!row || !row.sql) return;
+    const hasGlobalNameUnique = /\bname\s+TEXT\s+NOT NULL\s+UNIQUE\b/i.test(row.sql)
+      || /UNIQUE\s*\(\s*name\s*\)/i.test(row.sql);
+    if (hasGlobalNameUnique) {
+      const cols = db.prepare('PRAGMA table_info(product_categories)').all().map(c => c.name);
+      const dest = [
+        'id', 'name', 'parent_id', 'slug', 'product_count', 'created_at',
+        'source_supplier_id', 'ab_category_id', 'is_ab_category', 'sort_order',
+      ].filter(c => cols.includes(c));
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(`
+        CREATE TABLE product_categories__new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          parent_id INTEGER,
+          slug TEXT,
+          product_count INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          source_supplier_id INTEGER,
+          ab_category_id INTEGER,
+          is_ab_category INTEGER DEFAULT 0,
+          sort_order INTEGER DEFAULT 0
+        )
+      `);
+      db.exec(`INSERT INTO product_categories__new (${dest.join(',')}) SELECT ${dest.join(',')} FROM product_categories`);
+      db.exec('DROP TABLE product_categories');
+      db.exec('ALTER TABLE product_categories__new RENAME TO product_categories');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pc_parent ON product_categories(parent_id)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pc_parent_name ON product_categories(IFNULL(parent_id, 0), name)');
+  } catch (e) {
+    console.warn('[sourcing] product_categories unique migration:', e.message);
+  }
+}
+
 function initSourcingSchema(db) {
   registerNormalizeEan(db);
   db.exec(`
@@ -364,7 +404,7 @@ function initSourcingSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS product_categories (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      name            TEXT NOT NULL UNIQUE,
+      name            TEXT NOT NULL,
       parent_id       INTEGER REFERENCES product_categories(id),
       slug            TEXT,
       product_count   INTEGER DEFAULT 0,
@@ -475,6 +515,8 @@ function initSourcingSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_spa_norm_ean ON supplier_product_attrs(normalized_ean);
     CREATE INDEX IF NOT EXISTS idx_spa_supplier ON supplier_product_attrs(supplier_id);
   `);
+
+  migrateProductCategoriesParentNameUnique(db);
 
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_sp_normalized_ean ON supplier_products(normalized_ean)'); } catch (_) {}
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_sub_normalized_ean ON subiekt_products(normalized_ean)'); } catch (_) {}
@@ -2496,11 +2538,7 @@ async function fetchImpaktProducts(apiUrl, user, pass) {
             : null;
           const subName = sub ? String(sub.name || sub.Name || '').trim() : '';
           categoryStr = [mainName, subName].filter(Boolean).join(' > ');
-          if (!categoryStr) {
-            const mainId = firstCat.id || '';
-            const subId = sub ? (sub.id || '') : '';
-            categoryStr = [mainId, subId].filter(Boolean).join(' > ');
-          }
+          // Do not fall back to bare Impakt numeric IDs — they pollute the AB tree.
         }
 
         // --- Atrybuty techniczne: { name: value } ---
@@ -3367,8 +3405,6 @@ async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null
     if (supplier.source_type === 'url' && supplier.source_url) {
       const urlAuth = (supplier.url_user) ? { username: supplier.url_user, password: supplier.url_pass || '' } : null;
       mainProducts = await fetchSupplierUrl(supplier.source_url, colSettings, 1, urlAuth);
-      const gs105 = mainProducts.find(p => p.ean === '6971690790431');
-      console.log('--- GS105 from primary feed:', gs105 ? gs105.price : 'NOT FOUND');
       // Save to disk for file size tracking
       try {
         const uploadDir = path.join(__dirname, '..', '..', 'data', 'sourcing_uploads');
@@ -3497,8 +3533,6 @@ async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null
     const insHistory = db.prepare('INSERT INTO price_history (supplier_id, ean, price_pln) VALUES (?, ?, ?)');
 
     let loggedAttr = false;
-    const gs105_final = merged.find(p => p.ean === '6971690790431');
-    console.log('--- GS105 before insert:', gs105_final ? gs105_final.price : 'NOT FOUND');
     for (const p of merged) {
       // Zapisujemy surowe cechy w formacie 1:1 z hurtowni
       const rawAttrs = p.attributes || null;

@@ -407,7 +407,6 @@ async function loadInlineEditor(product, attrDefs) {
             `;
           }).join('')}
         </div>
-        </div>
         <div style="padding:0 20px 16px;display:flex;gap:8px;align-items:center;">
           <button type="submit" class="btn btn--primary btn--sm">💾 Zapisz atrybuty</button>
           <button type="button" class="btn btn--sm" style="background:var(--accent); color:#fff; border:none;" id="ofer-auto-extract-btn" data-prod-id="${product.id}">✨ Auto-Wypełnij (AI)</button>
@@ -562,7 +561,7 @@ const ConfigState = {
     { id: 5,  key: 'disk',        label: '5. Dyski',              type: 'multi',  categoryIds: [3947, 4448, 3981, 5157, 4248, 3975, 3740, 4267], catName: null,                     catAlias: ['dyski i akcesoria', 'dyski twarde wewnetrzne ssd', 'dyski twarde wewnetrzne hdd', 'dyski dyski ssd', 'zewnetrzny dysk ssd', 'dyski twarde zewnetrzne', 'dysk ssd', 'dysk hdd', 'nvme'], catExclude: ['obudow', 'kieszen', 'adapter'] },
     { id: 6,  key: 'gpu',         label: '6. Karta graficzna',    type: 'single', categoryIds: [3694, 3987], catName: null,        catAlias: ['karta graficzna', 'karty graficzne'] },
     { id: 7,  key: 'psu',         label: '7. Zasilacz',           type: 'single', categoryIds: [3758], catName: 'Zasilacze',              catAlias: ['zasilacz', 'zasilacze'] },
-    { id: 8,  key: 'casePc',      label: '8. Obudowa',            type: 'single', categoryIds: [3697, 3960], catName: null,                catAlias: ['obudow'] },
+    { id: 8,  key: 'casePc',      label: '8. Obudowa',            type: 'single', categoryIds: [3697, 3960], catName: null,                catAlias: ['obudowy komputerowe', 'obudowy pc', 'obudowy do komputerow', 'pc case', 'gehause', 'obudow'], catExclude: ['dysk', 'hdd', 'ssd', 'nas', 'zewnetrz'] },
     { id: 9,  key: 'os',          label: '9. System OS',          type: 'single', categoryIds: [3733], catName: 'Systemy operacyjne',     catAlias: ['systemy operacyjne', 'system operacyjny', 'operating system'] },
     { id: 10, key: 'accessories', label: '10. Akcesoria',         type: 'accessories' },
     { id: 11, key: 'services',    label: '11. Usługi',            type: 'services' }
@@ -788,6 +787,7 @@ function initConfiguratorTab() {
     delete ConfigState._loadedClientEmail;
     delete ConfigState._loadedNotesClient;
     delete ConfigState._loadedNotesInternal;
+    ConfigState.stepProducts = {};
     ConfigState.cart = emptyCart();
     ConfigState.preferences = {
       purpose: 'gaming',
@@ -1039,7 +1039,7 @@ async function loadStepContent() {
       const scoreCat = (c) => scoreStepCategory(c, step);
       const matched = cats.filter(c => scoreCat(c) > 0).sort((a, b) => scoreCat(b) - scoreCat(a));
       categoryIds = matched.map(c => c.id);
-      if (step.key === 'cooler' || step.key === 'ram' || step.key === 'os') {
+      if (step.key === 'cooler' || step.key === 'ram' || step.key === 'os' || step.key === 'casePc') {
         const specific = matched.filter(c => scoreCat(c) >= 5);
         if (specific.length) categoryIds = specific.map(c => c.id);
       }
@@ -1050,7 +1050,8 @@ async function loadStepContent() {
     }
 
     if (!catId) {
-      document.getElementById('ofer-step-list').innerHTML = `<div class="ofer-empty">Nie znaleziono kategorii dla '${step.catName || step.catAlias}'</div>`;
+      const aliasLabel = step.catName || (Array.isArray(step.catAlias) ? step.catAlias.slice(0, 3).join(', ') : step.catAlias) || step.label;
+      document.getElementById('ofer-step-list').innerHTML = `<div class="ofer-empty">Nie znaleziono kategorii dla '${aliasLabel}'</div>`;
       return;
     }
 
@@ -1294,21 +1295,57 @@ function renderStepProductsList(products, step, query = '') {
   if (onlyCompat) {
     const cpu = ConfigState.cart.cpu;
     const mb = ConfigState.cart.mb;
+    const compactTok = (s) => foldAttrName(s).replace(/[\s\-_]/g, '');
+    const sockOk = (hay, needle) => {
+      const cpuN = compactTok(needle);
+      if (!cpuN) return true;
+      const parts = String(hay || '').split(/[,;/|+]| i /i).map(compactTok).filter(Boolean);
+      const pool = parts.length ? parts : [compactTok(hay)].filter(Boolean);
+      return pool.some(p => p === cpuN || p.includes(cpuN) || cpuN.includes(p));
+    };
+    const ramOk = (mbType, ramType) => {
+      const a = compactTok(mbType), b = compactTok(ramType);
+      if (!a || !b) return true;
+      const gen = (s) => (s.match(/ddr[0-9]/) || [null])[0];
+      if (gen(a) && gen(b)) return gen(a) === gen(b);
+      return a.includes(b) || b.includes(a);
+    };
+    const FORM_RANK_FE = [['eeatx',6],['extendedatx',6],['eatx',6],['microatx',3],['matx',3],['miniitx',2],['itx',2],['ministx',1],['atx',4]];
+    const formRk = (s) => {
+      const n = compactTok(s);
+      let best = null;
+      for (const [k, v] of FORM_RANK_FE) {
+        if (n.includes(k) && (!best || k.length > best.key.length)) best = { key: k, v };
+      }
+      return best ? best.v : null;
+    };
     if (step.key === 'mb' && cpu) {
       const cpuSocket = getAttrVal(cpu, 'Socket');
-      if (cpuSocket) filtered = filtered.filter(p => getAttrVal(p, 'Socket') === cpuSocket);
+      if (cpuSocket) filtered = filtered.filter(p => {
+        const s = getAttrVal(p, 'Socket');
+        return !s || sockOk(s, cpuSocket);
+      });
     } else if (step.key === 'ram' && mb) {
-      const mbRam = getAttrVal(mb, 'Typ pamięci RAM');
-      if (mbRam) filtered = filtered.filter(p => { const t = getAttrVal(p, 'Typ'); return !t || mbRam.includes(t); });
+      const mbRam = getAttrVal(mb, 'Typ pamięci RAM') || getAttrVal(mb, 'Typ');
+      if (mbRam) filtered = filtered.filter(p => {
+        const t = getAttrVal(p, 'Typ') || getAttrVal(p, 'Typ pamięci RAM');
+        return !t || ramOk(mbRam, t);
+      });
     } else if (step.key === 'cooler' && cpu) {
       const cpuSocket = getAttrVal(cpu, 'Socket');
       if (cpuSocket) filtered = filtered.filter(p => {
         const s = getAttrVal(p, 'Socket') || getAttrVal(p, 'Kompatybilne sockety');
-        return !s || norm(String(s)).includes(norm(String(cpuSocket)));
+        return !s || sockOk(s, cpuSocket);
       });
     } else if (step.key === 'casePc' && mb) {
-      const mbFormat = getAttrVal(mb, 'Format');
-      if (mbFormat) filtered = filtered.filter(p => { const f = getAttrVal(p, 'Format płyty'); return !f || norm(f).includes(norm(mbFormat)); });
+      const mbFormat = getAttrVal(mb, 'Format') || getAttrVal(mb, 'Format płyty');
+      if (mbFormat) filtered = filtered.filter(p => {
+        const f = getAttrVal(p, 'Format płyty') || getAttrVal(p, 'Format');
+        if (!f) return true;
+        const cr = formRk(f), mr = formRk(mbFormat);
+        if (cr != null && mr != null) return mr <= cr;
+        return true;
+      });
     }
   }
 
@@ -1712,7 +1749,7 @@ window.updateServicePrice = function(id, val) {
 // ─── ACCESSORIES STEP ─────────────────────────────────────────────────────────
 const ACC_TABS = [
   { key: 'keyboard',    label: '⌨️ Klawiatura',       icon: '⌨️', type: 'single', categoryIds: [3720, 3849], aliases: ['klawiatur'] },
-  { key: 'mouse',       label: '🖱️ Myszka',           icon: '🖱️', type: 'single', categoryIds: [3821, 4516, 4614], aliases: ['myszy bezprzewodowe', 'myszy przewodowe', 'myszy komputerowe'], exclude: ['podklad'] },
+  { key: 'mouse',       label: '🖱️ Myszka',           icon: '🖱️', type: 'single', categoryIds: [3821, 4516, 4614], aliases: ['mysz', 'myszy', 'myszk', 'mouse'], exclude: ['podklad'] },
   { key: 'headset',     label: '🎧 Słuchawki',         icon: '🎧', type: 'single', categoryIds: [3953, 3904, 5377, 5608], aliases: ['sluchawki', 'headset', 'headsets consumer', 'headsets business'], exclude: ['mikrofon studyj'] },
   { key: 'monitor',     label: '🖥️ Monitory',         icon: '🖥️', type: 'multi',  categoryIds: [3700], aliases: ['monitory'], exclude: ['uchwyt', 'ramion'] },
   { key: 'mousepad',    label: '🟫 Podkładki',         icon: '🟫', type: 'multi',  categoryIds: [4136, 3848, 4153, 3721, 5166], aliases: ['podkladki pod myszki', 'podkladki do myszek', 'podkladka pod mysz', 'mousepad', 'mouse pad'], exclude: ['myszy bezprzewod', 'myszy przewod', 'myszy komputer'] },
@@ -1742,7 +1779,8 @@ async function loadAccessoriesForStep(activeTabKey) {
     matchedCats = cats.filter(cat => {
       if ((tab.exclude || []).some(ex => containsCatToken(cat.name, ex) || foldCatName(cat.name).includes(foldCatName(ex)))) return false;
       const byAlias = (tab.aliases || []).some(a => containsCatToken(cat.name, a));
-      return byAlias;
+      const byId = (tab.categoryIds || []).includes(cat.id);
+      return byAlias || byId;
     });
     console.log(`[ACC] Tab "${tab.key}" matched ${matchedCats.length} categories:`, matchedCats.map(c=>c.name));
 
@@ -2253,7 +2291,7 @@ async function saveQuote() {
     discount_value: discount,
     notes_internal: notesInternal,
     notes_client: notesClient,
-    total_buy_price: componentsCost,
+    total_buy_price: componentsCost + servicesCost,
     components: compList,
     services: servList,
     preferences: ConfigState.preferences
@@ -2277,6 +2315,7 @@ async function saveQuote() {
       delete ConfigState._loadedNotesClient;
       delete ConfigState._loadedNotesInternal;
       
+      ConfigState.stepProducts = {};
       ConfigState.cart = emptyCart();
       ConfigState.preferences = {
         purpose: 'gaming',
@@ -2407,6 +2446,7 @@ async function printQuote(id) {
               <tr>
                 <th>Komponent</th>
                 <th>Nazwa modelu</th>
+                <th>Cena</th>
               </tr>
             </thead>
             <tbody>
@@ -2414,19 +2454,21 @@ async function printQuote(id) {
                 <tr>
                   <td><strong>${c._step ? c._step.toUpperCase() : 'Część'}</strong></td>
                   <td>${c.name}</td>
+                  <td>${Number(c.effective_buy_price || c.price || 0).toFixed(2)} zł</td>
                 </tr>
               `).join('')}
               ${srvs.map(s => `
                 <tr>
                   <td><strong>USŁUGA</strong></td>
                   <td>${s.name}</td>
+                  <td>${Number(s.price || 0).toFixed(2)} zł</td>
                 </tr>
               `).join('')}
             </tbody>
           </table>
 
           <div class="total">
-            Razem do zapłaty: ${finalPrice.toFixed(2)} zł brutto
+            Razem do zapłaty: ${finalPrice.toFixed(2)} zł
           </div>
 
           ${q.notes_client ? `<div class="notes"><strong>Uwagi:</strong><br>${q.notes_client.replace(/\n/g, '<br>')}</div>` : ''}
@@ -2469,6 +2511,7 @@ async function editQuote(id) {
     
     const q = res.offer;
     
+    ConfigState.stepProducts = {};
     ConfigState.cart = emptyCart();
     
     // Parse components and services from JSON
@@ -2479,7 +2522,7 @@ async function editQuote(id) {
     // Populate preferences
     ConfigState.preferences = {
       purpose: prefs.purpose || 'gaming',
-      budget: prefs.budget || q.preferences?.budget || 5000,
+      budget: prefs.budget ?? 5000,
       platform: prefs.platform || 'any',
       cooler: prefs.cooler || 'any',
       rgb: prefs.rgb || 'any',
