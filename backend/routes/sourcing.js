@@ -438,8 +438,9 @@ router.post('/suppliers/:id/elko-brand-file', (req, res, next) => upload.single(
       // Refresh this brand's data
       const { products } = await svc.refreshOneSupplierFile(existing.id);
       // Re-run full supplier refresh to merge all brands
-      try { await svc.refreshSupplier(supplier_id); } catch(_) {}
-      return res.json({ success: true, id: existing.id, replaced: true, imported: products.length });
+      let warning = null;
+      try { await svc.refreshSupplier(supplier_id); } catch (e) { warning = e.message; console.warn('[sourcing] Elko merge after brand file:', e.message); }
+      return res.json({ success: true, id: existing.id, replaced: true, imported: products.length, warning });
     }
 
     // New brand file
@@ -452,8 +453,9 @@ router.post('/suppliers/:id/elko-brand-file', (req, res, next) => upload.single(
     });
     // Parse and merge
     const { products } = await svc.refreshOneSupplierFile(sfId);
-    try { await svc.refreshSupplier(supplier_id); } catch(_) {}
-    res.json({ success: true, id: sfId, replaced: false, imported: products.length });
+    let warning = null;
+    try { await svc.refreshSupplier(supplier_id); } catch (e) { warning = e.message; console.warn('[sourcing] Elko merge after brand file:', e.message); }
+    res.json({ success: true, id: sfId, replaced: false, imported: products.length, warning });
   } catch(e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -510,7 +512,7 @@ router.post('/suppliers/:id/refresh', upload.single('file'), async (req, res) =>
         if (req.file) fs.unlink(req.file.path, () => {});
         send({ status: 'done', success: true, ...result });
       } catch (e) {
-        send({ status: 'error', error: e.message });
+        send({ status: 'error', error: e.message, code: e.code });
       }
       res.end();
     } else {
@@ -519,7 +521,10 @@ router.post('/suppliers/:id/refresh', upload.single('file'), async (req, res) =>
       if (req.file) fs.unlink(req.file.path, () => {});
       res.json({ success: true, ...result });
     }
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) {
+    const status = e.code === 'REFRESH_IN_PROGRESS' ? 409 : 400;
+    res.status(status).json({ error: e.message, code: e.code || null });
+  }
 });
 
 
@@ -728,7 +733,16 @@ router.post('/suppliers/:id/files/:fid/refresh', (req, res, next) => upload.sing
       svc.updateSupplierFile(fid, { file_path: req.file.path, source_type: 'file' });
     }
     const { products } = await svc.refreshOneSupplierFile(fid);
-    res.json({ success: true, imported: products.length });
+    let imported = products.length;
+    let warning = null;
+    try {
+      const merged = await svc.refreshSupplier(parseInt(req.params.id));
+      imported = merged.imported;
+    } catch (e) {
+      warning = e.message;
+      console.warn('[sourcing] catalog rebuild after extra file:', e.message);
+    }
+    res.json({ success: true, imported, warning });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -749,6 +763,12 @@ router.patch('/suppliers/:id/files/:fid/schedule', (req, res) => {
   try {
     const fid = parseInt(req.params.fid);
     const { enabled, cron } = req.body;
+    if (cron) {
+      const { isValidCron } = require('../services/schedulerService');
+      if (!isValidCron(cron)) {
+        return res.status(400).json({ error: `Nieprawidłowe wyrażenie CRON: "${cron}"` });
+      }
+    }
     svc.getDb().prepare("UPDATE supplier_files SET schedule_enabled = ?, schedule_cron = ? WHERE id = ?").run(enabled ? 1 : 0, cron || null, fid);
     try {
       require('../services/schedulerService').reloadFileSchedule(fid);
@@ -995,10 +1015,14 @@ router.get('/compare', (req, res) => {
     const search        = req.query.search || '';
     const manufacturer  = req.query.manufacturer || '';
     const supplier_id   = req.query.supplier_id || null;
-    const cacheKey = `compare:${onlyAvailable}:${minSavingsPct}:${search}:${manufacturer}:${supplier_id}`;
+    const limit         = req.query.limit != null && req.query.limit !== '' ? parseInt(req.query.limit, 10) : null;
+    const offset        = req.query.offset ? parseInt(req.query.offset, 10) : 0;
+    const sortCol       = req.query.sortCol || null;
+    const sortAsc       = req.query.sortAsc !== 'false' && req.query.sortAsc !== '0';
+    const cacheKey = `compare:${onlyAvailable}:${minSavingsPct}:${search}:${manufacturer}:${supplier_id}:${limit}:${offset}:${sortCol}:${sortAsc}`;
     const cached = getCached(cacheKey);
     if (cached) return res.json({ ...cached, _cached: true });
-    const result = svc.buildComparison({ onlyAvailable, minSavingsPct, search, manufacturer, supplier_id });
+    const result = svc.buildComparison({ onlyAvailable, minSavingsPct, search, manufacturer, supplier_id, limit, offset, sortCol, sortAsc });
     setCached(cacheKey, result);
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -1038,7 +1062,8 @@ router.get('/promotions/export', (req, res) => {
     const threshold     = req.query.threshold ? parseFloat(req.query.threshold) : 10;
     const onlyAvailable = req.query.onlyAvailable === 'true';
     const search        = req.query.search || '';
-    const rows = svc.buildPromotions({ threshold, onlyAvailable, search });
+    const data = svc.buildPromotions({ threshold, onlyAvailable, search });
+    const rows = Array.isArray(data) ? data : (data.rows || []);
     const header = 'EAN;Nazwa;Super cena;Hurtownia;Cena ref.;Odnosnik;Oszcz. %;Dostepnosc;W Subiekcie;Stan;Cena sprzedazy';
     const lines = [header, ...rows.map(r => [
       r.ean, `"${(r.name||'').replace(/"/g,'""')}"`,
@@ -1053,6 +1078,7 @@ router.get('/promotions/export', (req, res) => {
     const fn = `promocje_${new Date().toISOString().slice(0,10)}.csv`;
     res.setHeader('Content-Type','text/csv; charset=utf-8');
     res.setHeader('Content-Disposition',`attachment; filename="${fn}"`);
+    res.send('\uFEFF' + lines.join('\r\n'));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1460,6 +1486,12 @@ router.patch('/catalog/categories/:id', (req, res) => {
     const { name } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nazwa jest wymagana' });
     const trimmed = name.trim();
+    const current = db.prepare('SELECT parent_id FROM product_categories WHERE id = ?').get(id);
+    if (!current) return res.status(404).json({ error: 'Kategoria nie znaleziona' });
+    const clash = current.parent_id == null
+      ? db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id IS NULL AND id != ?').get(trimmed, id)
+      : db.prepare('SELECT id FROM product_categories WHERE lower(name)=lower(?) AND parent_id = ? AND id != ?').get(trimmed, current.parent_id, id);
+    if (clash) return res.status(409).json({ error: `Kategoria „${trimmed}” już istnieje na tym poziomie drzewa` });
     db.prepare('UPDATE product_categories SET name = ? WHERE id = ?').run(trimmed, id);
     // Sync catalog_master category_name where this category is used
     db.prepare("UPDATE catalog_master SET category_name = ? WHERE category_id = ?").run(trimmed, id);
@@ -1704,7 +1736,7 @@ router.get('/suppliers/:id/raw-categories', (req, res) => {
       SELECT pc.id as cat_id, pc.name as cat_name, pc.parent_id,
              pc2.name as parent_name, COUNT(*) as match_cnt
       FROM supplier_products sp
-      JOIN catalog_master cm ON cm.canonical_ean = sp.ean
+      JOIN catalog_master cm ON normalize_ean(cm.canonical_ean) = COALESCE(NULLIF(sp.normalized_ean, ''), normalize_ean(sp.ean))
       JOIN product_categories pc ON pc.id = cm.category_id
       LEFT JOIN product_categories pc2 ON pc2.id = pc.parent_id
       WHERE sp.supplier_id = ? AND sp.category = ?
@@ -1737,47 +1769,12 @@ router.get('/suppliers/:id/raw-categories', (req, res) => {
 
 
 
-// POST /api/sourcing/catalog/generate-categories — auto-generuj kategorie z producentów
+// POST /api/sourcing/catalog/generate-categories — to samo drzewo AB co /api/generate-categories
 router.post('/catalog/generate-categories', (req, res) => {
   try {
-    const db = svc.getDb();
-    // Clear old AB marks
-    db.prepare('UPDATE product_categories SET is_ab_category = 0').run();
-    
-    // Generate from manufacturers
-    const manufacturers = db.prepare(`
-      SELECT manufacturer, COUNT(*) as cnt
-      FROM catalog_master
-      WHERE manufacturer IS NOT NULL AND manufacturer != ''
-      GROUP BY manufacturer
-      ORDER BY cnt DESC
-      LIMIT 200
-    `).all();
-
-    if (manufacturers.length === 0) {
-      return res.json({ ok: false, message: 'Brak producentów w katalogu. Najpierw odśwież hurtownie.' });
-    }
-
-    let created = 0, assigned = 0;
-    for (const m of manufacturers) {
-      const name = m.manufacturer;
-      const slug = name.toLowerCase().replace(/[^a-z0-9ąćęłńóśżź]+/g, '-').replace(/^-|-$/g, '');
-      
-      // Upsert category
-      db.prepare(`INSERT OR IGNORE INTO product_categories (name, slug, is_ab_category, product_count) VALUES (?, ?, 1, ?)`).run(name, slug, m.cnt);
-      const cat = db.prepare('SELECT id FROM product_categories WHERE name = ? LIMIT 1').get(name);
-      if (cat) {
-        db.prepare('UPDATE product_categories SET is_ab_category = 1 WHERE id = ?').run(cat.id);
-        const r = db.prepare('UPDATE catalog_master SET category_id = ?, category_name = ? WHERE manufacturer = ? AND (category_id IS NULL OR category_id = 0)').run(cat.id, name, name);
-        assigned += r.changes;
-        created++;
-      }
-    }
-
-    // Refresh counts  
-    db.prepare('UPDATE product_categories SET product_count = (SELECT COUNT(*) FROM catalog_master WHERE category_id = product_categories.id)').run();
-
-    res.json({ ok: true, created, assigned, message: `Utworzono ${created} kategorii, przypisano ${assigned} produktów.` });
+    const result = catalogSvc.generateAbCategoryTree(svc.getDb());
+    clearCache();
+    res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1801,6 +1798,7 @@ router.post('/catalog/mark-ab-supplier', (req, res) => {
     const { supplierId } = req.body;
     if (!supplierId) return res.status(400).json({ error: 'Brak supplierId' });
     const result = catalogSvc.markSupplierAsAb(svc.getDb(), parseInt(supplierId));
+    clearCache();
     res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -1985,13 +1983,6 @@ router.get('/catalog/categories/:id/attributes', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// PATCH /api/sourcing/catalog/categories/attributes/:id — toggle visibility
-router.patch('/catalog/categories/attributes/:id', (req, res) => {
-  try {
-    const visible = req.body.visible !== undefined ? req.body.visible : true;
-    res.json(catalogSvc.toggleCategoryAttribute(svc.getDb(), parseInt(req.params.id), visible));
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 // POST /api/sourcing/catalog/categories/batch-generate — generate for ALL categories
 router.post('/catalog/categories/batch-generate', async (req, res) => {
@@ -2008,6 +1999,13 @@ router.post('/catalog/categories/:id/generate-attributes', async (req, res) => {
     const useAi = req.body.useAi !== false;
     const result = await catalogSvc.generateAttributesForCategory(svc.getDb(), parseInt(req.params.id), useAi);
     res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/catalog/sync-attributes', (req, res) => {
+  try {
+    const result = catalogSvc.syncCatalogAttributes(svc.getDb(), { seedSchemas: true });
+    res.json({ ok: true, ...result });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2105,37 +2103,65 @@ router.get('/catalog/product/:idOrEan', (req, res) => {
     const idOrEan = req.params.idOrEan;
     const db = svc.getDb();
     
-    // Zawsze sprawdzamy najpierw czy to jest EAN w catalog_master
     let row = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ?').get(idOrEan);
     let productId = row ? row.id : null;
-    
-    // Jeśli nie ma EAN, sprawdzamy czy to poprawne ID (liczbowe)
+
+    if (!productId) {
+      try {
+        const n = catalogSvc.normalizeEan(idOrEan);
+        if (n) {
+          row = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ? OR normalize_ean(canonical_ean) = ? LIMIT 1').get(n, n);
+          if (row) productId = row.id;
+        }
+      } catch (_) {}
+    }
+
     if (!productId && /^\d+$/.test(idOrEan)) {
         const byId = db.prepare('SELECT id FROM catalog_master WHERE id = ?').get(parseInt(idOrEan, 10));
         if (byId) productId = byId.id;
     }
-    
-    // Jeśli nadal brak i przekazano EAN (nie krótkie ID), dodajemy go automatycznie do catalog_master
+
     if (!productId && !/^\d{1,7}$/.test(idOrEan)) {
-       let name = 'Nieznany produkt (' + idOrEan + ')';
+       let name = '';
        let mfg = '';
-       const supProd = db.prepare('SELECT name, manufacturer FROM supplier_products WHERE ean = ? AND name IS NOT NULL AND name != \'\' LIMIT 1').get(idOrEan);
+       const n = catalogSvc.normalizeEan(idOrEan) || idOrEan;
+       let supProd = db.prepare(
+         `SELECT name, manufacturer FROM supplier_products WHERE ean = ? AND name IS NOT NULL AND name != '' LIMIT 1`
+       ).get(idOrEan);
+       if (!supProd) {
+         try {
+           supProd = db.prepare(
+             `SELECT name, manufacturer FROM supplier_products
+              WHERE (normalized_ean = ? OR normalize_ean(ean) = ?) AND name IS NOT NULL AND name != ''
+              LIMIT 1`
+           ).get(n, n);
+         } catch (_) {}
+       }
        if (supProd) {
           name = supProd.name;
           mfg = supProd.manufacturer || '';
        } else {
-          const subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE ean = ? LIMIT 1').get(idOrEan);
+          let subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE ean = ? LIMIT 1').get(idOrEan);
+          if (!subProd) {
+            try {
+              subProd = db.prepare('SELECT name, manufacturer FROM subiekt_products WHERE normalize_ean(ean) = ? LIMIT 1').get(n);
+            } catch (_) {}
+          }
           if (subProd) {
              name = subProd.name;
              mfg = subProd.manufacturer || '';
           }
        }
-       
-       try {
-          const ins = db.prepare('INSERT INTO catalog_master (canonical_ean, name, normalized_name, manufacturer) VALUES (?, ?, ?, ?)').run(idOrEan, name, name, mfg);
-          productId = ins.lastInsertRowid;
-       } catch(e) {
-          console.error('Auto-insert do catalog_master nie powiódł się', e);
+
+       if (name) {
+         try {
+            const ins = db.prepare('INSERT INTO catalog_master (canonical_ean, name, normalized_name, manufacturer) VALUES (?, ?, ?, ?)').run(n, name, name, mfg);
+            productId = ins.lastInsertRowid;
+         } catch(e) {
+            console.error('Auto-insert do catalog_master nie powiódł się', e);
+            const again = db.prepare('SELECT id FROM catalog_master WHERE canonical_ean = ? OR normalize_ean(canonical_ean) = ? LIMIT 1').get(n, n);
+            if (again) productId = again.id;
+         }
        }
     }
     

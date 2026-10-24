@@ -16,6 +16,10 @@ const Database = require('better-sqlite3');
 const ftp      = require('basic-ftp');
 const SftpClient = require('ssh2-sftp-client');
 const AdmZip   = require('adm-zip');
+const {
+  normalizeEan, eanVariants, registerNormalizeEan,
+  buildCatalogEanGroups, groupKeyForEan,
+} = require('./eanUtil');
 
 
 
@@ -35,11 +39,79 @@ function getDb(dataDir) {
   fs.mkdirSync(dataDir, { recursive: true });
   const db = new Database(require('path').join(dataDir, 'shopgold_cache.db'));
   initSourcingSchema(db);
+  registerNormalizeEan(db);
   _dbCache.set(dataDir, db);
   return db;
 }
 
+function backfillNormalizedEans(db) {
+  try {
+    const spMissing = db.prepare(
+      "SELECT COUNT(*) AS c FROM supplier_products WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')"
+    ).get().c;
+    if (spMissing > 0) {
+      db.exec("UPDATE supplier_products SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+    }
+  } catch (e) {
+    console.warn('[sourcing] backfill supplier normalized_ean:', e.message);
+  }
+  try {
+    const subMissing = db.prepare(
+      "SELECT COUNT(*) AS c FROM subiekt_products WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')"
+    ).get().c;
+    if (subMissing > 0) {
+      db.exec("UPDATE subiekt_products SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+    }
+  } catch (e) {
+    console.warn('[sourcing] backfill subiekt normalized_ean:', e.message);
+  }
+  try {
+    db.exec("UPDATE supplier_product_attrs SET normalized_ean = normalize_ean(ean) WHERE ean IS NOT NULL AND ean != '' AND (normalized_ean IS NULL OR normalized_ean = '')");
+  } catch (_) {}
+}
+
+function migrateProductCategoriesParentNameUnique(db) {
+  try {
+    const row = db.prepare(
+      "SELECT sql FROM sqlite_master WHERE type='table' AND name='product_categories'"
+    ).get();
+    if (!row || !row.sql) return;
+    const hasGlobalNameUnique = /\bname\s+TEXT\s+NOT NULL\s+UNIQUE\b/i.test(row.sql)
+      || /UNIQUE\s*\(\s*name\s*\)/i.test(row.sql);
+    if (hasGlobalNameUnique) {
+      const cols = db.prepare('PRAGMA table_info(product_categories)').all().map(c => c.name);
+      const dest = [
+        'id', 'name', 'parent_id', 'slug', 'product_count', 'created_at',
+        'source_supplier_id', 'ab_category_id', 'is_ab_category', 'sort_order',
+      ].filter(c => cols.includes(c));
+      db.exec('PRAGMA foreign_keys = OFF');
+      db.exec(`
+        CREATE TABLE product_categories__new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          parent_id INTEGER,
+          slug TEXT,
+          product_count INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          source_supplier_id INTEGER,
+          ab_category_id INTEGER,
+          is_ab_category INTEGER DEFAULT 0,
+          sort_order INTEGER DEFAULT 0
+        )
+      `);
+      db.exec(`INSERT INTO product_categories__new (${dest.join(',')}) SELECT ${dest.join(',')} FROM product_categories`);
+      db.exec('DROP TABLE product_categories');
+      db.exec('ALTER TABLE product_categories__new RENAME TO product_categories');
+    }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pc_parent ON product_categories(parent_id)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_pc_parent_name ON product_categories(IFNULL(parent_id, 0), name)');
+  } catch (e) {
+    console.warn('[sourcing] product_categories unique migration:', e.message);
+  }
+}
+
 function initSourcingSchema(db) {
+  registerNormalizeEan(db);
   db.exec(`
     CREATE TABLE IF NOT EXISTS subiekt_products (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,13 +175,13 @@ function initSourcingSchema(db) {
       price_pln     REAL,
       weight_g      REAL DEFAULT 0,
       availability  TEXT DEFAULT 'unknown',
+      condition     TEXT DEFAULT 'new',
       stock_quantity INTEGER,
       refreshed_at  TEXT DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_sp_ean      ON supplier_products(ean);
     CREATE INDEX IF NOT EXISTS idx_sp_supplier ON supplier_products(supplier_id);
     CREATE INDEX IF NOT EXISTS idx_sp_ean_avail ON supplier_products(ean, availability);
-    CREATE INDEX IF NOT EXISTS idx_sp_ean_cond  ON supplier_products(ean, condition);
 
     CREATE TABLE IF NOT EXISTS supplier_files (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -287,11 +359,16 @@ function initSourcingSchema(db) {
     "ALTER TABLE suppliers ADD COLUMN action_customer_id TEXT",
     "ALTER TABLE suppliers ADD COLUMN action_user_name TEXT",
     "ALTER TABLE suppliers ADD COLUMN action_api_key TEXT",
+    "ALTER TABLE supplier_products ADD COLUMN normalized_ean TEXT",
+    "ALTER TABLE subiekt_products ADD COLUMN normalized_ean TEXT",
+    "ALTER TABLE product_attributes ADD COLUMN source TEXT DEFAULT 'supplier'",
   ];
 
   for (const m of migrations) {
     try { db.exec(m); } catch(_) {}
   }
+
+  try { db.exec("CREATE INDEX IF NOT EXISTS idx_sp_ean_cond ON supplier_products(ean, condition)"); } catch (_) {}
 
   // Catalog Master table
   db.exec(`
@@ -327,7 +404,7 @@ function initSourcingSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS product_categories (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      name            TEXT NOT NULL UNIQUE,
+      name            TEXT NOT NULL,
       parent_id       INTEGER REFERENCES product_categories(id),
       slug            TEXT,
       product_count   INTEGER DEFAULT 0,
@@ -352,6 +429,7 @@ function initSourcingSchema(db) {
       attribute_id    INTEGER NOT NULL REFERENCES category_attributes(id) ON DELETE CASCADE,
       value_text      TEXT,
       value_numeric   REAL,
+      source          TEXT DEFAULT 'supplier',
       UNIQUE(catalog_id, attribute_id)
     );
     CREATE INDEX IF NOT EXISTS idx_pa_catalog ON product_attributes(catalog_id);
@@ -423,7 +501,28 @@ function initSourcingSchema(db) {
       price REAL DEFAULT 0,
       is_active INTEGER DEFAULT 1
     );
+
+    CREATE TABLE IF NOT EXISTS supplier_product_attrs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      supplier_id INTEGER NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+      ean TEXT NOT NULL,
+      normalized_ean TEXT,
+      attr_name TEXT NOT NULL,
+      attr_value TEXT,
+      UNIQUE(supplier_id, ean, attr_name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_spa_ean ON supplier_product_attrs(ean);
+    CREATE INDEX IF NOT EXISTS idx_spa_norm_ean ON supplier_product_attrs(normalized_ean);
+    CREATE INDEX IF NOT EXISTS idx_spa_supplier ON supplier_product_attrs(supplier_id);
   `);
+
+  migrateProductCategoriesParentNameUnique(db);
+
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_sp_normalized_ean ON supplier_products(normalized_ean)'); } catch (_) {}
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_sub_normalized_ean ON subiekt_products(normalized_ean)'); } catch (_) {}
+  try { db.exec("ALTER TABLE supplier_product_attrs ADD COLUMN normalized_ean TEXT"); } catch (_) {}
+
+  backfillNormalizedEans(db);
 
   // Data cleanup: fix any product names/manufacturers stored as '[object Object]' from XML parsing bugs
   try {
@@ -689,9 +788,9 @@ function _doImportSubiekt(dataRows, headers, idx) {
   db.transaction(() => {
     db.prepare('DELETE FROM subiekt_products').run();
     const ins = db.prepare(
-      'INSERT INTO subiekt_products (ean, name, stock, buy_price, sell_price, sold_12m, sold_30d, buy_price_date, weight_g, sell_price_allegro, sell_price_idealpc, buy_price_gross) VALUES (@ean, @name, @stock, @buy_price, @sell_price, @sold_12m, @sold_30d, @buy_price_date, @weight_g, @sell_price_allegro, @sell_price_idealpc, @buy_price_gross)'
+      'INSERT INTO subiekt_products (ean, normalized_ean, name, stock, buy_price, sell_price, sold_12m, sold_30d, buy_price_date, weight_g, sell_price_allegro, sell_price_idealpc, buy_price_gross) VALUES (@ean, @normalized_ean, @name, @stock, @buy_price, @sell_price, @sold_12m, @sold_30d, @buy_price_date, @weight_g, @sell_price_allegro, @sell_price_idealpc, @buy_price_gross)'
     );
-    for (const p of products) ins.run(p);
+    for (const p of products) ins.run({ ...p, normalized_ean: normalizeEan(p.ean) });
   })();
 
   addLog({ action: 'subiekt_import', status: 'ok', details: `Zaimportowano ${products.length} produktow` });
@@ -1623,7 +1722,19 @@ function parseSupplierCsv(buffer, colSettings = {}) {
     cols.push(cur.trim()); return cols;
   };
 
-  const headers = parseLine(lines[0]).map(h => h.toLowerCase().replace(/^"|"$/g, '').trim());
+  const firstCols = parseLine(lines[0]).map(c => c.replace(/^"|"$/g, '').trim());
+  const looksLikeHeader = firstCols.some(c => /ean|gtin|barcode|price|cena|name|nazwa|sku|manufacturer|producent|stock|ilo[sś]c|quantity/i.test(c));
+  const looksLikeEan = firstCols.some(c => /^\d{12,14}$/.test(String(c).replace(/\s/g, '')));
+  const looksLikePrice = firstCols.some(c => /^\d+([.,]\d+)?$/.test(String(c).trim()));
+  const headerless = !looksLikeHeader && looksLikeEan && looksLikePrice;
+
+  if (headerless) {
+    const headers = firstCols.map((_, i) => `col_${i}`);
+    const dataRows = lines.map(l => parseLine(l));
+    return _parseTabular(headers, dataRows, colSettings);
+  }
+
+  const headers = firstCols.map(h => h.toLowerCase().trim());
   const dataRows = lines.slice(1).map(l => parseLine(l));
   return _parseTabular(headers, dataRows, colSettings);
 }
@@ -1649,7 +1760,8 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
                           'waga_brutto', 'waga_z_opakowaniem', 'masa_brutto', 'weight_gross', 'weight_brutto',
                           'waga', 'waga_netto', 'masa', 'masa_netto', 'weight', 'weight_net', 'gewicht'];
   const CAT_PATS = [
-    ...(colSettings.cat_field ? [colSettings.cat_field.toLowerCase()] : []),
+    ...(colSettings.cat_field != null && colSettings.cat_field !== '' && !/^(#)?\d+$/.test(String(colSettings.cat_field).trim())
+      ? [String(colSettings.cat_field).toLowerCase()] : []),
     'product group', 'product_group', 'product category', 'product_category', 'category', 'categories',
                           'kategoria', 'group', 'grupa', 'typ', 'type', 'klasa', 'class', 'rodzaj', 'dzial',
                           'podkategoria', 'subcategory', 'grupa_towarowa', 'nazwa_grupy', 'nazwa_kategorii', 'nazwa kategorii', 'komodita', 'kat1', 'kat2', 'kat3', 'kat4', 'kat5', 'kat6', 'catalogname', 'catalog name'];
@@ -1695,7 +1807,15 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
 
 
   const findCol = (pats, override) => {
-    if (override) { const i = headers.indexOf(override.toLowerCase()); if (i >= 0) return i; }
+    if (override !== undefined && override !== null && override !== '') {
+      const raw = String(override).trim();
+      if (/^(#)?\d+$/.test(raw)) {
+        const i = parseInt(raw.replace('#', ''), 10);
+        if (i >= 0 && i < headers.length) return i;
+      }
+      const i = headers.indexOf(raw.toLowerCase());
+      if (i >= 0) return i;
+    }
     for (const pat of pats) {
       const i = headers.findIndex(h => h === pat || h.includes(pat));
       if (i >= 0) return i;
@@ -1703,8 +1823,17 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
     return -1;
   };
 
-  const eanIdx   = findCol(EAN_PATS,   colSettings.ean_field);
-  const priceIdx = findCol(PRICE_PATS, colSettings.price_field);
+  let eanIdx   = findCol(EAN_PATS,   colSettings.ean_field);
+  let priceIdx = findCol(PRICE_PATS, colSettings.price_field);
+  if ((eanIdx < 0 || priceIdx < 0) && dataRows[0]) {
+    const row0 = dataRows[0];
+    if (eanIdx < 0) {
+      eanIdx = row0.findIndex(c => /^\d{12,14}$/.test(String(c).replace(/\s/g, '')));
+    }
+    if (priceIdx < 0) {
+      priceIdx = row0.findIndex((c, i) => i !== eanIdx && /^\d+[.,]\d{1,4}$/.test(String(c).trim()));
+    }
+  }
   if (eanIdx < 0 || priceIdx < 0) return [];
 
   const nameIdx  = findCol(NAME_PATS,  colSettings.name_field);
@@ -1715,7 +1844,7 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
   const warrIdx  = findCol(WARR_PATS,  colSettings.warr_field);
   const weightIdx= findCol(WEIGHT_PATS,colSettings.weight_field);
   const catIdx   = findCol(CAT_PATS,   colSettings.cat_field);
-  const mfgCodeIdx  = findCol(MFG_CODE_PATS,  colSettings.mfg_code_field);
+  const mfgCodeIdx  = findCol(MFG_CODE_PATS,  colSettings.mfg_code_field || colSettings.manufacturer_code);
   const srpIdx      = findCol(SRP_PATS,       colSettings.srp_field);
   const priceGrossIdx = findCol(PRICE_GROSS_PATS, colSettings.price_gross_field);
   const priceEurIdx = findCol(PRICE_EUR_PATS,  colSettings.price_eur_field);
@@ -2055,14 +2184,23 @@ async function fetchActionProducts(customerId, userName, apiKey, onProgress = nu
   } catch (err) {
     const msg = (err.response && err.response.data && err.response.data.errorMessage) || err.message;
     progress('[Action API] WARN: GetAll niedostepny, fallback:', msg);
-    progress('[Action API] 1/5 - Fallback: Product/GetExtraItems...');
-    const resp2 = await axios.get(BASE + '/Product/GetExtraItems', { headers, timeout: 90000 });
-    if (!resp2.data || !resp2.data.success) {
-      const status = err.response && err.response.status;
-      throw new Error('Action API blad (HTTP ' + status + '): ' + ((resp2.data && resp2.data.errorMessage) || err.message));
+    try {
+      progress('[Action API] 1/5 - Fallback: Product/GetExtraItems...');
+      const resp2 = await axios.get(BASE + '/Product/GetExtraItems', { headers, timeout: 90000 });
+      if (!resp2.data || !resp2.data.success) {
+        throw Object.assign(new Error((resp2.data && resp2.data.errorMessage) || 'GetExtraItems failed'), { response: resp2 });
+      }
+      mainProducts = Array.isArray(resp2.data.data) ? resp2.data.data : [];
+      progress('[Action API]   => Fallback: Pobrano ' + mainProducts.length + ' produktow z GetExtraItems');
+    } catch (err2) {
+      const status = (err2.response && err2.response.status) || (err.response && err.response.status);
+      const m2 = (err2.response && err2.response.data && err2.response.data.errorMessage) || err2.message;
+      if (status === 401) {
+        progress('[Action API] 401: ' + m2 + ' — pomijam REST API (uzywam plikow XML, jesli sa).');
+        return [];
+      }
+      throw new Error('Action API blad (HTTP ' + status + '): ' + m2);
     }
-    mainProducts = Array.isArray(resp2.data.data) ? resp2.data.data : [];
-    progress('[Action API]   => Fallback: Pobrano ' + mainProducts.length + ' produktow z GetExtraItems');
   }
 
   if (mainProducts.length === 0) return [];
@@ -2430,15 +2568,16 @@ async function fetchImpaktProducts(apiUrl, user, pass) {
           ? (item.manufacturer.name || item.manufacturer.id || '')
           : String(item.manufacturer || '');
 
-        // --- Kategoria: bierzemy ID podkategorii z pierwszego wpisu ---
         let categoryStr = '';
         if (Array.isArray(item.categories) && item.categories.length > 0) {
           const firstCat = item.categories[0];
-          const mainId = firstCat.id || '';
-          const subId = (Array.isArray(firstCat.subcategories) && firstCat.subcategories.length > 0)
-            ? firstCat.subcategories[0].id || ''
-            : '';
-          categoryStr = subId ? `${mainId}|${subId}` : mainId;
+          const mainName = String(firstCat.name || firstCat.Name || '').trim();
+          const sub = (Array.isArray(firstCat.subcategories) && firstCat.subcategories.length > 0)
+            ? firstCat.subcategories[0]
+            : null;
+          const subName = sub ? String(sub.name || sub.Name || '').trim() : '';
+          categoryStr = [mainName, subName].filter(Boolean).join(' > ');
+          // Do not fall back to bare Impakt numeric IDs — they pollute the AB tree.
         }
 
         // --- Atrybuty techniczne: { name: value } ---
@@ -2619,6 +2758,17 @@ async function fetchFtpFile(supplier) {
     }
   }
 
+  try {
+    const viaCurl = await fetchFtpFileCurl({ host: cleanHost, port, user, pass, ftpPath });
+    if (viaCurl && viaCurl.length) {
+      console.log(`[FTP] OK (curl PASV skip-ip): ${cleanHost}:${port}${ftpPath} → ${viaCurl.length} bajtów`);
+      return viaCurl;
+    }
+  } catch (curlErr) {
+    console.warn(`[FTP] curl fallback: ${curlErr.message}`);
+    lastErr = lastErr || curlErr;
+  }
+
   // Build a helpful error message
   const hint = lastErr?.message?.includes('ECONNREFUSED') ? `Serwer ${cleanHost}:${port} odmawia połączenia — sprawdź host i port.`
              : lastErr?.message?.includes('ETIMEDOUT')    ? `Timeout — serwer ${cleanHost}:${port} nie odpowiada. Sprawdź firewall lub użyj SFTP (port 22).`
@@ -2626,6 +2776,37 @@ async function fetchFtpFile(supplier) {
              : lastErr?.message?.includes('550')          ? `Plik nie znaleziony (550) — sprawdź ścieżkę: "${ftpPath}".`
              : lastErr?.message || 'Nieznany błąd FTP';
   throw new Error(`FTP: ${hint}`);
+}
+
+async function fetchFtpFileCurl({ host, port, user, pass, ftpPath }) {
+  const os = require('os');
+  const { spawn } = require('child_process');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-ftp-'));
+  const netrc = path.join(tmpDir, 'netrc');
+  const out = path.join(tmpDir, 'download.bin');
+  const remote = ftpPath.startsWith('/') ? ftpPath : `/${ftpPath}`;
+  fs.writeFileSync(netrc, `machine ${host} login ${user} password ${pass}\n`, { mode: 0o600 });
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn('curl', [
+        '-sS', '-n', `--netrc-file=${netrc}`,
+        '--ftp-skip-pasv-ip', '--disable-epsv',
+        '--connect-timeout', '20', '--max-time', '600',
+        '-o', out,
+        `ftp://${host}:${port}${remote}`,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let err = '';
+      child.stderr.on('data', d => { err += d.toString(); });
+      child.on('error', reject);
+      child.on('close', code => {
+        if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) resolve();
+        else reject(new Error((err || `curl exit ${code}`).split('\n')[0]));
+      });
+    });
+    return fs.readFileSync(out);
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
 }
 
 
@@ -3208,7 +3389,28 @@ function translateAttrKeys(attrs) {
   return result;
 }
 
+const _refreshLocks = new Map();
+
+function isSupplierRefreshing(id) {
+  return _refreshLocks.has(Number(id));
+}
+
 async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent = false) {
+  const sid = Number(id);
+  if (_refreshLocks.has(sid)) {
+    const err = new Error('Odświeżanie tej hurtowni już trwa — poczekaj na zakończenie bieżącego cyklu');
+    err.code = 'REFRESH_IN_PROGRESS';
+    throw err;
+  }
+  _refreshLocks.set(sid, Date.now());
+  try {
+    return await _refreshSupplierUnlocked(sid, fileBuffer, onProgress, silent);
+  } finally {
+    _refreshLocks.delete(sid);
+  }
+}
+
+async function _refreshSupplierUnlocked(id, fileBuffer = null, onProgress = null, silent = false) {
   const db = getDb();
   const supplier = db.prepare('SELECT * FROM suppliers WHERE id = ?').get(id);
   if (!supplier) throw new Error('Hurtownia nie znaleziona');
@@ -3235,9 +3437,12 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
         const l = (s.match(/[a-zA-Z]/g) || []).length;
         return d >= l && d > 1;
       };
-      if (!mergedMap[p.ean]) {
-        mergedMap[p.ean] = {
+      const eanKey = normalizeEan(p.ean) || String(p.ean || '').trim();
+      if (!eanKey) continue;
+      if (!mergedMap[eanKey]) {
+        mergedMap[eanKey] = {
           ...p,
+          ean: eanKey,
           manufacturer: isNum(p.manufacturer) ? '' : (p.manufacturer || ''),
           price_pln: pricePln,
           availability: p.availability || 'unknown',
@@ -3245,34 +3450,32 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
         };
       } else {
         if (fileType === 'stock_price') {
-          mergedMap[p.ean].price = p.price;
-          mergedMap[p.ean].price_pln = pricePln;
-          mergedMap[p.ean].availability = p.availability || mergedMap[p.ean].availability;
-          mergedMap[p.ean].stock_quantity = p.stock_quantity ?? mergedMap[p.ean].stock_quantity;
+          if (Number(p.price) > 0) {
+            mergedMap[eanKey].price = p.price;
+            mergedMap[eanKey].price_pln = pricePln;
+          }
+          mergedMap[eanKey].availability = p.availability || mergedMap[eanKey].availability;
+          mergedMap[eanKey].stock_quantity = p.stock_quantity ?? mergedMap[eanKey].stock_quantity;
         } else {
-          // For 'full' extra files, only fill in missing price/stock
-          if (p.price > 0 && mergedMap[p.ean].price === 0) {
-            mergedMap[p.ean].price = p.price;
-            mergedMap[p.ean].price_pln = pricePln;
+          if (p.price > 0 && (!mergedMap[eanKey].price || mergedMap[eanKey].price === 0)) {
+            mergedMap[eanKey].price = p.price;
+            mergedMap[eanKey].price_pln = pricePln;
           }
-          if (mergedMap[p.ean].stock_quantity === null || mergedMap[p.ean].stock_quantity === undefined) {
-            mergedMap[p.ean].stock_quantity = p.stock_quantity;
+          if (mergedMap[eanKey].stock_quantity === null || mergedMap[eanKey].stock_quantity === undefined) {
+            mergedMap[eanKey].stock_quantity = p.stock_quantity;
           }
-          mergedMap[p.ean].availability = mergedMap[p.ean].availability === 'unknown' ? p.availability : mergedMap[p.ean].availability;
+          mergedMap[eanKey].availability = mergedMap[eanKey].availability === 'unknown' ? p.availability : mergedMap[eanKey].availability;
         }
-        mergedMap[p.ean].weight_g = p.weight_g || mergedMap[p.ean].weight_g;
-        if (fileType === 'full' || !mergedMap[p.ean].name) {
-          if (p.name) mergedMap[p.ean].name = p.name;
-          if (p.manufacturer && !isNum(p.manufacturer)) mergedMap[p.ean].manufacturer = p.manufacturer;
+        mergedMap[eanKey].weight_g = p.weight_g || mergedMap[eanKey].weight_g;
+        if (fileType === 'full' || !mergedMap[eanKey].name) {
+          if (p.name) mergedMap[eanKey].name = p.name;
+          if (p.manufacturer && !isNum(p.manufacturer)) mergedMap[eanKey].manufacturer = p.manufacturer;
         }
-        if (p.manufacturer_code && !mergedMap[p.ean].manufacturer_code) mergedMap[p.ean].manufacturer_code = p.manufacturer_code;
-        if (p.category && !mergedMap[p.ean].category) mergedMap[p.ean].category = p.category;
-        // Merge attributes: combine from all files (extra file attrs overwrite main if both have same key)
+        if (p.manufacturer_code && !mergedMap[eanKey].manufacturer_code) mergedMap[eanKey].manufacturer_code = p.manufacturer_code;
+        if (p.category && !mergedMap[eanKey].category) mergedMap[eanKey].category = p.category;
         if (p.attributes && Object.keys(p.attributes).length > 0) {
-          const existing = mergedMap[p.ean].attributes || {};
-          const existingCount = Object.keys(existing).length;
-          // Always merge — extra file can add new keys or fill missing ones
-          mergedMap[p.ean].attributes = { ...existing, ...p.attributes };
+          const existing = mergedMap[eanKey].attributes || {};
+          mergedMap[eanKey].attributes = { ...existing, ...p.attributes };
         }
       }
     }
@@ -3283,8 +3486,6 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
     if (supplier.source_type === 'url' && supplier.source_url) {
       const urlAuth = (supplier.url_user) ? { username: supplier.url_user, password: supplier.url_pass || '' } : null;
       mainProducts = await fetchSupplierUrl(supplier.source_url, colSettings, 1, urlAuth);
-      const gs105 = mainProducts.find(p => p.ean === '6971690790431');
-      console.log('--- GS105 from primary feed:', gs105 ? gs105.price : 'NOT FOUND');
       // Save to disk for file size tracking
       try {
         const uploadDir = path.join(__dirname, '..', '..', 'data', 'sourcing_uploads');
@@ -3407,14 +3608,12 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
   db.transaction(() => {
     db.prepare('DELETE FROM supplier_products WHERE supplier_id = ?').run(id);
     const ins = db.prepare(
-      'INSERT INTO supplier_products (supplier_id, ean, name, manufacturer, manufacturer_code, price, price_pln, price_gross, price_srp, price_eur, price_regular, discount_percent, vat, availability, condition, warranty, warranty_months, is_being_ordered, delivery_date, package_size, stock_quantity, stock_reserved, incoming_stock, shipping_time_hours, is_special_offer, is_eol, is_non_returnable, is_large_product, weight_g, weight_net_g, unit_measure, category, pcn_code, volume, product_url, product_type, availability_info, related_products, date_added, description, photos, supplier_product_id, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+      'INSERT INTO supplier_products (supplier_id, ean, normalized_ean, name, manufacturer, manufacturer_code, price, price_pln, price_gross, price_srp, price_eur, price_regular, discount_percent, vat, availability, condition, warranty, warranty_months, is_being_ordered, delivery_date, package_size, stock_quantity, stock_reserved, incoming_stock, shipping_time_hours, is_special_offer, is_eol, is_non_returnable, is_large_product, weight_g, weight_net_g, unit_measure, category, pcn_code, volume, product_url, product_type, availability_info, related_products, date_added, description, photos, supplier_product_id, attributes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
     );
     const getHistory = db.prepare('SELECT price_pln, recorded_at FROM price_history WHERE supplier_id=? AND ean=? ORDER BY recorded_at DESC LIMIT 1');
     const insHistory = db.prepare('INSERT INTO price_history (supplier_id, ean, price_pln) VALUES (?, ?, ?)');
 
     let loggedAttr = false;
-    const gs105_final = merged.find(p => p.ean === '6971690790431');
-    console.log('--- GS105 before insert:', gs105_final ? gs105_final.price : 'NOT FOUND');
     for (const p of merged) {
       // Zapisujemy surowe cechy w formacie 1:1 z hurtowni
       const rawAttrs = p.attributes || null;
@@ -3427,6 +3626,7 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
       ins.run(
         id,                              // supplier_id
         p.ean,                           // ean
+        normalizeEan(p.ean),             // normalized_ean
         p.name,                          // name
         p.manufacturer,                  // manufacturer
         p.manufacturer_code || '',       // manufacturer_code
@@ -3493,6 +3693,8 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
     db.prepare("DELETE FROM price_history WHERE recorded_at < datetime('now', '-90 days')").run();
 
     db.prepare("UPDATE suppliers SET product_count=?, last_refresh=datetime('now') WHERE id=?").run(merged.length, id);
+
+    replaceSupplierProductAttrs(db, id, merged);
   })();
 
   addLog({ supplier_id: id, action: 'refresh', status: 'ok', details: `Scalono ${merged.length} SKU (${supplierFiles.length} dodatkowych plikow, kurs: ${rateToUse.toFixed(4)})` });
@@ -3516,13 +3718,46 @@ async function refreshSupplier(id, fileBuffer = null, onProgress = null, silent 
   try {
     const catalogService = require('./catalogService');
     const catResult = catalogService.rebuildCatalogForSupplier(db, id);
-    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych` });
+    const attrNote = catResult.attrs ? `, cech: ${catResult.attrs.filled}` : '';
+    addLog({ supplier_id: id, action: 'catalog_update', status: 'ok', details: `Katalog: +${catResult.created} nowych, ${catResult.updated} zaktualizowanych, ${catResult.pruned || 0} usuniętych ofert${attrNote}` });
   } catch(catErr) {
     console.error('[catalog_update] ERROR:', catErr.message, catErr.stack);
     addLog({ supplier_id: id, action: 'catalog_update', status: 'error', details: catErr.message });
   }
 
+  try {
+    const sourcingRoutes = require('../routes/sourcing');
+    if (typeof sourcingRoutes._clearSourcingCache === 'function') sourcingRoutes._clearSourcingCache();
+  } catch (_) {}
+
   return { supplier_id: id, imported: merged.length };
+}
+
+function replaceSupplierProductAttrs(db, supplierId, products) {
+  try {
+    db.prepare('DELETE FROM supplier_product_attrs WHERE supplier_id = ?').run(supplierId);
+  } catch (_) {
+    return;
+  }
+  let ins;
+  try {
+    ins = db.prepare(
+      'INSERT OR REPLACE INTO supplier_product_attrs (supplier_id, ean, normalized_ean, attr_name, attr_value) VALUES (?, ?, ?, ?, ?)'
+    );
+  } catch (_) {
+    return;
+  }
+  for (const p of products) {
+    const attrs = p.attributes;
+    if (!attrs || typeof attrs !== 'object') continue;
+    const norm = normalizeEan(p.ean);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (!k || v == null) continue;
+      const val = String(v).trim();
+      if (!val || val === '-' || val === '0') continue;
+      ins.run(supplierId, p.ean, norm, String(k).slice(0, 200), val.slice(0, 2000));
+    }
+  }
 }
 
 async function refreshAllSuppliers() {
@@ -3533,6 +3768,10 @@ async function refreshAllSuppliers() {
 
   for (const s of suppliers) {
     try {
+      if (isSupplierRefreshing(s.id)) {
+        results.push({ id: s.id, name: s.name, status: 'skipped', error: 'Odświeżanie już trwa' });
+        continue;
+      }
       const r = await refreshSupplier(s.id, null, null, true);
       results.push({ id: s.id, name: s.name, status: 'ok', imported: r.imported });
       successList.push(`${s.name} (${r.imported} SKU)`);
@@ -3570,12 +3809,99 @@ async function refreshAllSuppliers() {
 
 // ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
-function buildComparison({ onlyAvailable = false, minSavingsPct = null, search = '', manufacturer = '', supplier_id = null } = {}) {
+function loadCatalogEanGroups(db) {
+  try {
+    const rows = db.prepare('SELECT canonical_ean, all_eans FROM catalog_master').all();
+    return buildCatalogEanGroups(rows);
+  } catch (_) {
+    return new Map();
+  }
+}
+
+function indexOffersByNormalizedEan(allOffers) {
+  const offerMap = {};
+  for (const o of allOffers) {
+    if (!o.price_pln || o.price_pln <= 0) continue;
+    const key = normalizeEan(o.normalized_ean || o.ean);
+    if (!key) continue;
+    if (!offerMap[key]) offerMap[key] = [];
+    offerMap[key].push(o);
+  }
+  return offerMap;
+}
+
+function collectOffersForEan(ean, offerMap, catalogGroups) {
+  const key = normalizeEan(ean);
+  if (!key) return [];
+  const group = catalogGroups && catalogGroups.get(key);
+  const keys = group && group.size ? group : new Set([key]);
+  const out = [];
+  const seen = new Set();
+  for (const k of keys) {
+    const list = offerMap[k] || [];
+    for (const o of list) {
+      const id = `${o.supplier_id}:${o.ean}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(o);
+    }
+  }
+  return out;
+}
+
+function sortComparisonRows(rows, sortCol, sortAsc) {
+  const dir = sortAsc ? 1 : -1;
+  const list = [...rows];
+  if (!sortCol) {
+    list.sort((a, b) => (b.savings_pct || 0) - (a.savings_pct || 0));
+    return list;
+  }
+  list.sort((a, b) => {
+    let av;
+    let bv;
+    if (String(sortCol).startsWith('sup_')) {
+      const sid = parseInt(String(sortCol).replace('sup_', ''), 10);
+      av = a.supplier_prices?.[sid]?.price;
+      bv = b.supplier_prices?.[sid]?.price;
+    } else {
+      av = a[sortCol];
+      bv = b[sortCol];
+    }
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir;
+    return String(av).localeCompare(String(bv), 'pl', { numeric: true }) * dir;
+  });
+  return list;
+}
+
+function buildComparison({
+  onlyAvailable = false,
+  minSavingsPct = null,
+  search = '',
+  manufacturer = '',
+  supplier_id = null,
+  limit = null,
+  offset = 0,
+  sortCol = null,
+  sortAsc = true,
+} = {}) {
   const db = getDb();
 
   let subQuery = 'SELECT *, buy_price_date FROM subiekt_products WHERE 1=1';
   const params = [];
-  if (search) { subQuery += ' AND (name LIKE ? OR ean LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+  if (search) {
+    subQuery += ' AND (name LIKE ? OR ean LIKE ? OR IFNULL(normalized_ean, \'\') LIKE ?';
+    params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    const digits = String(search).replace(/[^0-9]/g, '');
+    const vars = digits.length >= 8 ? eanVariants(digits) : [];
+    if (vars.length) {
+      subQuery += ` OR ean IN (${vars.map(() => '?').join(',')}) OR normalized_ean IN (${vars.map(() => '?').join(',')})`;
+      params.push(...vars, ...vars);
+    }
+    subQuery += ')';
+  }
 
   const subProducts = db.prepare(subQuery).all(...params);
 
@@ -3583,7 +3909,9 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
   const threeMonthsAgo = new Date();
   threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
   const threeMonthsCutoff = threeMonthsAgo.toISOString().slice(0, 10);
-  if (!subProducts.length) return { rows: [], suppliers: [] };
+  if (!subProducts.length) {
+    return { rows: [], suppliers: [], allManufacturers: [], total: 0, limit: null, offset: 0, stats: { green: 0, yellow: 0, red: 0, totalSav: 0 } };
+  }
 
   const suppliers = db.prepare('SELECT * FROM suppliers ORDER BY name').all();
 
@@ -3604,14 +3932,15 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
   offerQuery += ' ORDER BY COALESCE(sp.price_pln, sp.price) ASC';
 
   const allOffers = db.prepare(offerQuery).all(...offerParams);
-
-  const offerMap = {};
-  for (const o of allOffers) {
-    // Skip offers with price 0 or null — these are noise (missing data)
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
+  const catalogMeta = {};
+  try {
+    for (const row of db.prepare('SELECT canonical_ean, name, manufacturer FROM catalog_master').all()) {
+      const key = groupKeyForEan(row.canonical_ean, catalogGroups) || normalizeEan(row.canonical_ean);
+      if (key && !catalogMeta[key]) catalogMeta[key] = { name: row.name || '', manufacturer: row.manufacturer || '' };
+    }
+  } catch (_) {}
 
   // Get all unique manufacturers from supplier products for filter dropdown
   const allManufacturersRaw = db.prepare(
@@ -3621,7 +3950,7 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
 
   const rows = [];
   for (const sub of subProducts) {
-    const offers = offerMap[sub.ean] || [];
+    const offers = collectOffersForEan(sub.ean, offerMap, catalogGroups);
     if (supplier_id && !offers.length) continue; // Skip if filtered by supplier and no offers
     const filtered = onlyAvailable ? offers.filter(o => o.availability === 'available') : offers;
     const best = filtered.length ? filtered.reduce((a, b) => a.price_pln < b.price_pln ? a : b) : null;
@@ -3637,6 +3966,11 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
     if (offers.length > 0) {
       if (!name) name = offers.map(o => o.sp_name || '').reduce((a, b) => a.length > b.length ? a : b, '');
       rowMfg = offers.map(o => normalizeManufacturer(o.sp_manufacturer || '')).find(m => m.length > 0) || '';
+    }
+    const catMeta = catalogMeta[groupKeyForEan(sub.ean, catalogGroups)];
+    if (catMeta) {
+      if (catMeta.name) name = catMeta.name;
+      if (catMeta.manufacturer) rowMfg = catMeta.manufacturer;
     }
     rowMfg = normalizeManufacturer(rowMfg);
     if (manufacturer && !rowMfg.toLowerCase().includes(manufacturer.toLowerCase())) continue;
@@ -3665,7 +3999,7 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
     }
 
     rows.push({
-      ean: sub.ean, name: sub.name, stock: sub.stock,
+      ean: sub.ean, name: name || sub.name, stock: sub.stock,
       sold_12m: sub.sold_12m, sold_30d: sub.sold_30d,
       buy_price: sub.buy_price, sell_price: sub.sell_price,
       buy_price_date: sub.buy_price_date || null,
@@ -3682,11 +4016,31 @@ function buildComparison({ onlyAvailable = false, minSavingsPct = null, search =
     });
   }
 
-  return { rows, suppliers, allManufacturers };
+  const sorted = sortComparisonRows(rows, sortCol, sortAsc);
+  const stats = {
+    green: sorted.filter(r => r.signal === 'green').length,
+    yellow: sorted.filter(r => r.signal === 'yellow').length,
+    red: sorted.filter(r => r.signal === 'red').length,
+    totalSav: sorted.reduce((s, r) => s + (r.savings || 0), 0),
+  };
+  const total = sorted.length;
+  const pageOffset = Math.max(0, parseInt(offset, 10) || 0);
+  const pageLimit = limit == null || limit === '' ? null : Math.max(1, parseInt(limit, 10) || 100);
+  const pageRows = pageLimit == null ? sorted : sorted.slice(pageOffset, pageOffset + pageLimit);
+
+  return {
+    rows: pageRows,
+    suppliers,
+    allManufacturers,
+    total,
+    limit: pageLimit,
+    offset: pageOffset,
+    stats,
+  };
 }
 
 function exportComparisonCsv(options = {}) {
-  const { rows, suppliers } = buildComparison(options);
+  const { rows, suppliers } = buildComparison({ ...options, limit: null, offset: 0 });
   const supplierNames = suppliers.map(s => s.name);
   const header = ['EAN','Nazwa','Stan','Sprzedaz 30d','Sprzedaz 12m','Cena zakupu','Cena sprzedazy',
     'Najlepsza cena','Najtansza hurtownia','Oszczednosc (zl)','Oszczednosc (%)','Sygnal',
@@ -3723,7 +4077,7 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
 
   const subMap = {};
   db.prepare('SELECT ean, name, buy_price, sell_price, stock, sold_30d FROM subiekt_products').all()
-    .forEach(r => { subMap[r.ean] = r; });
+    .forEach(r => { subMap[normalizeEan(r.ean) || r.ean] = r; });
 
   const allOffers = db.prepare(`
     SELECT sp.ean, COALESCE(sp.price_pln, sp.price) as price_pln, sp.price,
@@ -3736,20 +4090,21 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
     ORDER BY price_pln ASC
   `).all();
 
-  const offerMap = {};
-  for (const o of allOffers) {
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
 
   const rows = [];
   const eans = new Set([...Object.keys(subMap), ...Object.keys(offerMap)]);
   const suppliers = db.prepare('SELECT id, name, currency FROM suppliers WHERE COALESCE(is_active, 1) = 1').all();
+  const seenGroups = new Set();
 
   for (const ean of eans) {
-    const sub = subMap[ean];
-    let offers = offerMap[ean] || [];
+    const group = catalogGroups.get(normalizeEan(ean));
+    const groupKey = group && group.size ? [...group].sort()[0] : (normalizeEan(ean) || ean);
+    if (seenGroups.has(groupKey)) continue;
+    seenGroups.add(groupKey);
+    const sub = subMap[ean] || subMap[normalizeEan(ean)] || (group ? [...group].map(k => subMap[k]).find(Boolean) : null);
+    let offers = collectOffersForEan(ean, offerMap, catalogGroups);
     if (onlyAvailable) offers = offers.filter(o => o.availability === 'available');
     if (!offers.length) continue;
 
@@ -3782,7 +4137,7 @@ function buildPromotions({ threshold = 10, onlyAvailable = false, search = '' } 
     }
 
     rows.push({
-      ean, name,
+      ean: sub?.ean || best.ean || ean, name,
       manufacturer: manufacturer,
       best_price: best.price_pln, best_supplier: best.supplier_name, best_supplier_id: best.supplier_id,
       ref_price: refPrice, ref_label: refLabel,
@@ -3809,7 +4164,7 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
 
   const subMap = {};
   db.prepare('SELECT ean, name, buy_price, sell_price, stock, sold_30d FROM subiekt_products').all()
-    .forEach(r => { subMap[r.ean] = r; });
+    .forEach(r => { subMap[normalizeEan(r.ean) || r.ean] = r; });
 
   const allOffers = db.prepare(`
     SELECT sp.ean, COALESCE(sp.price_pln, sp.price) as price_pln, sp.price,
@@ -3822,19 +4177,20 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
     ORDER BY price_pln ASC
   `).all();
 
-  const offerMap = {};
-  for (const o of allOffers) {
-    if (!o.price_pln || o.price_pln <= 0) continue;
-    if (!offerMap[o.ean]) offerMap[o.ean] = [];
-    offerMap[o.ean].push(o);
-  }
+  const offerMap = indexOffersByNormalizedEan(allOffers);
+  const catalogGroups = loadCatalogEanGroups(db);
 
   const qualifyingRows = [];
   const eans = new Set([...Object.keys(subMap), ...Object.keys(offerMap)]);
+  const seenGroups = new Set();
 
   for (const ean of eans) {
-    const sub = subMap[ean];
-    let offers = offerMap[ean] || [];
+    const group = catalogGroups.get(normalizeEan(ean));
+    const groupKey = group && group.size ? [...group].sort()[0] : (normalizeEan(ean) || ean);
+    if (seenGroups.has(groupKey)) continue;
+    seenGroups.add(groupKey);
+    const sub = subMap[ean] || subMap[normalizeEan(ean)] || (group ? [...group].map(k => subMap[k]).find(Boolean) : null);
+    let offers = collectOffersForEan(ean, offerMap, catalogGroups);
     if (onlyAvailable) offers = offers.filter(o => o.availability === 'available');
     if (!offers.length) continue;
 
@@ -3897,7 +4253,7 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
     }
 
     qualifyingRows.push({
-      ean, name, manufacturer,
+      ean: sub?.ean || best.ean || ean, name, manufacturer,
       best_price: best.price_pln, best_supplier: best.supplier_name, best_supplier_id: best.supplier_id,
       ref_price: refPrice, ref_label: refLabel,
       deal_type: dealType, savings_pct: savingsPct,
@@ -3970,7 +4326,15 @@ function buildSuperDeals({ threshold = 50, onlyAvailable = false, search = '' } 
 function getMissingProducts({ supplier_id = null, search = '', availability = '', manufacturer = '', limit = 500, offset = 0 } = {}) {
   const db = getDb();
 
-  const subEans = new Set(db.prepare('SELECT DISTINCT ean FROM subiekt_products').all().map(r => r.ean));
+  const subEans = new Set(
+    db.prepare('SELECT DISTINCT ean FROM subiekt_products').all()
+      .flatMap(r => eanVariants(r.ean).map(normalizeEan).filter(Boolean))
+  );
+  const catalogGroups = loadCatalogEanGroups(db);
+  for (const ean of [...subEans]) {
+    const group = catalogGroups.get(ean);
+    if (group) group.forEach(k => subEans.add(k));
+  }
 
   // Build a global name/manufacturer/manufacturer_code lookup from ALL suppliers (for cross-referencing)
   // This ensures products from suppliers without names (e.g. Incom) can get names
@@ -3982,15 +4346,16 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
   for (const nr of nameRows) {
     const cleanName = (nr.name || '').trim();
     if (!cleanName || /^[.\-/?!_]+$/.test(cleanName)) continue;
-    if (!globalNameMap[nr.ean]) {
-      globalNameMap[nr.ean] = { name: nr.name, manufacturer: nr.manufacturer || '', manufacturer_code: nr.manufacturer_code || '' };
+    const nameKey = normalizeEan(nr.ean) || nr.ean;
+    if (!globalNameMap[nameKey]) {
+      globalNameMap[nameKey] = { name: nr.name, manufacturer: nr.manufacturer || '', manufacturer_code: nr.manufacturer_code || '' };
     } else {
       // Fill in missing manufacturer_code from other suppliers
-      if (!globalNameMap[nr.ean].manufacturer_code && nr.manufacturer_code) {
-        globalNameMap[nr.ean].manufacturer_code = nr.manufacturer_code;
+      if (!globalNameMap[nameKey].manufacturer_code && nr.manufacturer_code) {
+        globalNameMap[nameKey].manufacturer_code = nr.manufacturer_code;
       }
-      if (!globalNameMap[nr.ean].manufacturer && nr.manufacturer) {
-        globalNameMap[nr.ean].manufacturer = nr.manufacturer;
+      if (!globalNameMap[nameKey].manufacturer && nr.manufacturer) {
+        globalNameMap[nameKey].manufacturer = nr.manufacturer;
       }
     }
   }
@@ -4007,13 +4372,18 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
         manufacturer_code: cr.manufacturer_code || '',
         manufacturer: cr.manufacturer || ''
       };
+      catalogCodeMap[normalizeEan(cr.canonical_ean) || cr.canonical_ean] = info;
       catalogCodeMap[cr.canonical_ean] = info;
       if (cr.all_eans) {
         try {
           const variants = JSON.parse(cr.all_eans);
           if (Array.isArray(variants)) {
             for (const v of variants) {
-              if (v) catalogCodeMap[v] = info;
+              if (v) {
+                catalogCodeMap[v] = info;
+                const nv = normalizeEan(v);
+                if (nv) catalogCodeMap[nv] = info;
+              }
             }
           }
         } catch(_) {}
@@ -4038,12 +4408,14 @@ function getMissingProducts({ supplier_id = null, search = '', availability = ''
 
   const eanAllOffers = {};
   for (const o of allOffers) {
-    if (subEans.has(o.ean)) continue;
+    const key = normalizeEan(o.ean);
+    if (!key) continue;
+    if (subEans.has(key)) continue;
     if (!o.price_pln || o.price_pln <= 0) continue;
     // NOTE: manufacturer filter is applied AFTER cross-referencing (see below),
     // so we collect all EANs here regardless of per-supplier manufacturer field.
-    if (!eanAllOffers[o.ean]) eanAllOffers[o.ean] = [];
-    eanAllOffers[o.ean].push(o);
+    if (!eanAllOffers[key]) eanAllOffers[key] = [];
+    eanAllOffers[key].push(o);
   }
 
   const eanMap = {};
@@ -4940,8 +5312,18 @@ function getAttrManagerList(categoryId = null, supplierId = null, onlyAvailable 
   ]);
 
   // Dynamic filter — also catches patterns not covered by exact list
+  let attrSync = null;
+  try { attrSync = require('./catalogAttrSync'); } catch (_) {}
   const _gamBL = (k) => {
+    if (attrSync && attrSync.isJunkAttrName(k)) return true;
     if (_GAM_BL.has(k.toLowerCase())) return true;
+    if (attrSync) {
+      const resolved = attrSync.resolveKey(k, null);
+      if (resolved && !attrSync.isJunkAttrName(resolved)) {
+        const known = attrSync.PC_ATTR_ALIASES.some(([, canon]) => attrSync.fold(canon) === attrSync.fold(resolved));
+        if (known) return false;
+      }
+    }
     if (/^\d+$/.test(k)) return true;              // purely numeric IDs like "13427"
     if (k.includes('?')) return true;              // corrupted encoding
     if (/^[BDEFGRW]\d{3}M$/.test(k)) return true; // warranty codes: F024M, G012M
@@ -5680,7 +6062,7 @@ module.exports = {
   importSubiektExcel, importSubiektCsv, getSubiektStatus,
   // suppliers
   listSuppliers, addSupplier, deleteSupplier, updateSupplier,
-  replaceSupplierFile, refreshSupplier, refreshAllSuppliers,
+  replaceSupplierFile, refreshSupplier, refreshAllSuppliers, isSupplierRefreshing,
   // supplier_files
   listSupplierFiles, addSupplierFile, updateSupplierFile, deleteSupplierFile, refreshOneSupplierFile,
   // schedule

@@ -852,11 +852,9 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           progBar.textContent = '⏳ Łączenie z Action API...';
 
           try {
-            const token = localStorage.getItem('sg_token') || '';
-            const company = localStorage.getItem('sg_company') || '';
             const response = await fetch(`/api/sourcing/suppliers/${id}/refresh`, {
               method: 'POST',
-              headers: { 'X-User-Token': token, 'X-Company-Id': company }
+              headers: API._headers()
             });
             if (!response.ok) throw new Error('HTTP ' + response.status);
 
@@ -879,6 +877,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
                   } else if (ev.status === 'done') {
                     progBar.textContent = '✅ Zsynchronizowano ' + (ev.imported || 0) + ' SKU';
                     Toast.success(`✅ Action API: wczytano ${ev.imported || 0} SKU`);
+                    clearTabCache();
                     setTimeout(() => { progBar.remove(); renderSuppliers(); }, 3000);
                   } else if (ev.status === 'error') {
                     throw new Error(ev.error || 'Nieznany błąd');
@@ -910,6 +909,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
             ? await API.upload(`/sourcing/suppliers/${id}/refresh`, fd)
             : await API.post(`/sourcing/suppliers/${id}/refresh`, {});
           Toast.success(`✅ Wczytano ${r.imported} SKU`);
+          clearTabCache();
           renderSuppliers();
         } catch(e) { Toast.error(e.message); btn.innerHTML='🔄 Odswież'; btn.disabled=false; }
       });
@@ -928,6 +928,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           const fd = new FormData(); fd.append('file', inp.files[0]);
           const r = await API.upload(`/sourcing/suppliers/${id}/replace-file`, fd);
           Toast.success(`✅ Plik zastapiony — wczytano ${r.imported} SKU`);
+          clearTabCache();
           renderSuppliers();
         } catch(e) { Toast.error(e.message); btn.disabled=false; btn.textContent='📂 Zastąp plik'; }
       });
@@ -1045,7 +1046,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     document.querySelectorAll('.btn-analyze-supplier').forEach(btn => {
       btn.addEventListener('click', () => {
         Toast.success('Analiza uruchomiona. Trwa pobieranie kolumn...');
-        setTimeout(() => _openMappingModal(btn.dataset.id, btn.dataset.name), 500);
+        setTimeout(() => showSupplierMappingModal(btn.dataset.id, btn.dataset.name), 500);
       });
     });
 
@@ -2123,7 +2124,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     document.getElementById('sched-now-btn').addEventListener('click', async () => {
       const b = document.getElementById('sched-now-btn');
       b.disabled=true; b.textContent='⏳...';
-      try { const r = await API.post(`/sourcing/suppliers/${id}/refresh`,{}); Toast.success(`✅ ${r.imported} SKU`); }
+      try { const r = await API.post(`/sourcing/suppliers/${id}/refresh`,{}); Toast.success(`✅ ${r.imported} SKU`); clearTabCache(); }
       catch(e) { Toast.error(e.message); }
       b.disabled=false; b.textContent='🔄 Odśwież teraz';
     });
@@ -2316,28 +2317,31 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
           const name = btn.dataset.name;
           const cronVal = btn.dataset.cron;
           const enabled = btn.dataset.enabled === '1';
-          
-          Modal.show({
-            title: `⏰ Harmonogram pliku: ${escHtml(name)}`,
-            body: `<div style="display:flex;flex-direction:column;gap:12px">
-              <label style="display:flex;align-items:center;gap:8px">
+          let panel = document.getElementById('sf-sched-panel');
+          if (!panel) {
+            panel = document.createElement('div');
+            panel.id = 'sf-sched-panel';
+            el.prepend(panel);
+          }
+          panel.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;padding:12px;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-elevated)">
+              <div style="font-weight:600;font-size:.85rem">⏰ Harmonogram: ${escHtml(name)}</div>
+              <label style="display:flex;align-items:center;gap:8px;font-size:.82rem">
                 <input type="checkbox" id="sf-sched-enabled"${enabled?' checked':''}>
                 Włącz automatyczne pobieranie tego pliku
               </label>
-              <div class="form-group">
+              <div class="form-group" style="margin:0">
                 <label class="form-label">Wyrażenie CRON (np. <code>0 * * * *</code> = co godzinę)</label>
                 <input class="form-input" id="sf-sched-cron" value="${escHtml(cronVal||'0 * * * *')}">
                 <div style="font-size:.7rem;color:var(--text-muted);margin-top:4px">
-                  0 * * * * = co pełną godzinę<br>
-                  */15 * * * * = co 15 minut<br>
-                  0 2 * * * = codziennie o 2:00
+                  0 * * * * = co pełną godzinę · */15 * * * * = co 15 minut · 0 2 * * * = codziennie o 2:00
                 </div>
               </div>
-            </div>`,
-            footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Anuluj</button>
-                     <button class="btn btn--primary" id="sf-sched-save-btn">Zapisz</button>`
-          });
-          
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn btn--secondary btn--sm" id="sf-sched-cancel-btn">Anuluj</button>
+                <button class="btn btn--primary btn--sm" id="sf-sched-save-btn">Zapisz</button>
+              </div>
+            </div>`;
+          document.getElementById('sf-sched-cancel-btn').onclick = () => panel.remove();
           document.getElementById('sf-sched-save-btn').onclick = async () => {
             const btnSave = document.getElementById('sf-sched-save-btn');
             btnSave.disabled = true; btnSave.textContent = 'Zapisywanie...';
@@ -2348,8 +2352,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
               };
               await API.patch(`/sourcing/suppliers/${supplierId}/files/${fid}/schedule`, payload);
               Toast.success('Zapisano harmonogram pliku');
-              Modal.hide();
-              renderFilesModalBody(supplierId);
+              await renderFilesModalBody(supplierId);
             } catch(e) {
               Toast.error(e.message);
               btnSave.disabled = false; btnSave.textContent = 'Zapisz';
@@ -2417,6 +2420,10 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     if (filterSearch)    params.set('search', filterSearch);
     if (filterMfg)       params.set('manufacturer', filterMfg);
     if (filterSupplierId) params.set('supplier_id', filterSupplierId);
+    params.set('limit', String(comparePageSize));
+    params.set('offset', String(comparePage * comparePageSize));
+    if (sortCol) params.set('sortCol', sortCol);
+    params.set('sortAsc', sortAsc ? 'true' : 'false');
     const cacheKey = `compare:${params}`;
     const cached = getTabCache(cacheKey);
     if (cached) {
@@ -2463,12 +2470,17 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
         <p>Zaimportuj produkty z Subiekta i dodaj cenniki hurtowni.</p></div>`;
       return;
     }
+    if (data.total != null && comparePage > 0 && rows.length === 0 && data.total > 0) {
+      comparePage = Math.max(0, Math.ceil(data.total / comparePageSize) - 1);
+      renderCompare();
+      return;
+    }
 
-    const green  = rows.filter(r=>r.signal==='green').length;
-    const yellow = rows.filter(r=>r.signal==='yellow').length;
-    const red    = rows.filter(r=>r.signal==='red').length;
-    const totalSav = rows.reduce((s,r)=>s+(r.savings||0),0);
-    const sorted = sortRows([...rows]);
+    const green  = data.stats?.green ?? rows.filter(r=>r.signal==='green').length;
+    const yellow = data.stats?.yellow ?? rows.filter(r=>r.signal==='yellow').length;
+    const red    = data.stats?.red ?? rows.filter(r=>r.signal==='red').length;
+    const totalSav = data.stats?.totalSav ?? rows.reduce((s,r)=>s+(r.savings||0),0);
+    const sorted = rows;
     const hidden = getCmpHiddenCols();
     const isHidden = col => hidden.includes(col);
 
@@ -2585,14 +2597,14 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
       }
     }
 
-    // Pagination
-    const totalRows = sorted.length;
+    // Pagination — rows already sliced on the server
+    const totalRows = data.total != null ? data.total : sorted.length;
     const totalPages = Math.ceil(totalRows / comparePageSize) || 1;
-    if (comparePage >= totalPages) comparePage = totalPages - 1;
+    if (comparePage >= totalPages) comparePage = Math.max(0, totalPages - 1);
     if (comparePage < 0) comparePage = 0;
-    const pageStart = comparePage * comparePageSize;
-    const pageEnd = Math.min(pageStart + comparePageSize, totalRows);
-    const pageRows = sorted.slice(pageStart, pageEnd);
+    const pageStart = totalRows === 0 ? 0 : comparePage * comparePageSize;
+    const pageEnd = Math.min(pageStart + sorted.length, totalRows);
+    const pageRows = sorted;
 
     const tbody = pageRows.map(r => {
       const usedCls = (r.condition === 'used') ? ' class="row-used"' : '';
@@ -2679,7 +2691,7 @@ ${tabs.map(t=>`<div id="src-tab-${t}" class="sourcing-tab-content${activeTab===t
     <label>Oszczędność ≥</label>
     <select id="cmp-savings" class="form-input">
       <option value="">Wszystkie</option>
-      ${[5,10,15,20,30].map(v=>`<option value="${v}"${filterSavings===v?' selected':''}>${v}%</option>`).join('')}
+      ${[5,10,15,20,30].map(v=>`<option value="${v}"${String(filterSavings)===String(v)?' selected':''}>${v}%</option>`).join('')}
     </select>
   </div>
   <div class="toolbar-group" style="margin-left:auto;gap:4px">
@@ -2720,18 +2732,18 @@ ${rows.length === 0
     // Filtry
     let searchTimer;
     document.getElementById('cmp-search').addEventListener('input', e => {
-      clearTimeout(searchTimer); searchTimer = setTimeout(() => { filterSearch = e.target.value; renderCompare(); }, 400);
+      clearTimeout(searchTimer); searchTimer = setTimeout(() => { filterSearch = e.target.value; comparePage = 0; renderCompare(); }, 400);
     });
-    document.getElementById('cmp-avail').addEventListener('change', e => { filterAvail = e.target.checked; renderCompare(); });
+    document.getElementById('cmp-avail').addEventListener('change', e => { filterAvail = e.target.checked; comparePage = 0; renderCompare(); });
     const mfgSel = document.getElementById('cmp-mfg');
-    if (mfgSel) mfgSel.addEventListener('change', e => { filterMfg = e.target.value; renderCompare(); });
+    if (mfgSel) mfgSel.addEventListener('change', e => { filterMfg = e.target.value; comparePage = 0; renderCompare(); });
     const supSel = document.getElementById('cmp-supplier');
-    if (supSel) supSel.addEventListener('change', e => { filterSupplierId = e.target.value; renderCompare(); });
-    document.getElementById('cmp-savings').addEventListener('change', e => { filterSavings = e.target.value; renderCompare(); });
+    if (supSel) supSel.addEventListener('change', e => { filterSupplierId = e.target.value; comparePage = 0; renderCompare(); });
+    document.getElementById('cmp-savings').addEventListener('change', e => { filterSavings = e.target.value; comparePage = 0; renderCompare(); });
     document.getElementById('cmp-refresh-btn').addEventListener('click', () => { comparePage=0; renderCompare(); });
-    document.getElementById('cmp-pg-prev')?.addEventListener('click', () => { comparePage--; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); });
-    document.getElementById('cmp-pg-next')?.addEventListener('click', () => { comparePage++; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); });
-    document.getElementById('cmp-page-size')?.addEventListener('change', e => { const v = parseInt(e.target.value); if (v >= 10) { comparePageSize = v; comparePage = 0; renderCompareTable(el, compareData); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+    document.getElementById('cmp-pg-prev')?.addEventListener('click', () => { comparePage--; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    document.getElementById('cmp-pg-next')?.addEventListener('click', () => { comparePage++; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); });
+    document.getElementById('cmp-page-size')?.addEventListener('change', e => { const v = parseInt(e.target.value); if (v >= 10) { comparePageSize = v; comparePage = 0; renderCompare(); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
 
     // Kolumny toggle
     document.getElementById('cmp-cols-btn').addEventListener('click', () => {
@@ -2770,7 +2782,8 @@ ${rows.length === 0
         const col = th.dataset.col;
         if (sortCol === col) sortAsc = !sortAsc;
         else { sortCol = col; sortAsc = true; }
-        renderCompareTable(el, compareData);
+        comparePage = 0;
+        renderCompare();
       });
     });
 
@@ -3345,6 +3358,88 @@ ${offers.length?`<table class="compare-table" style="font-size:.82rem">
       console.error(e);
       const sec = document.getElementById('ph-section');
       if(sec) sec.innerHTML = `<div style="color:#ef4444;font-size:.82rem;text-align:center">Błąd ładowania historii: ${e.message}</div>`;
+    }
+  }
+
+  async function showCatalogPricesModal(ean, name) {
+    try {
+      const result = await API.get(`/sourcing/catalog/prices/${encodeURIComponent(ean)}`);
+      const prices = result.prices || [];
+      const sub = result.subiekt || null;
+      const bestPrice = prices.find(p => p.price_pln > 0)?.price_pln || null;
+      const subAvailC = sub
+        ? `<span style="color:#10b981;font-weight:600">✅ W ofercie</span>`
+        : `<span style="color:#94a3b8">— Brak w Subiekcie</span>`;
+      const subStockC = sub?.stock ?? null;
+      const subStockHtmlC = subStockC != null
+        ? (subStockC > 10 ? `<span style="color:#10b981">${subStockC} szt</span>`
+          : subStockC > 0 ? `<span style="color:#f59e0b">${subStockC} szt (mało)</span>`
+          : `<span style="color:#ef4444">0 szt (brak)</span>`)
+        : `<span style="color:#94a3b8">—</span>`;
+      const subSellC = sub?.sell_price ?? null;
+      const subBuyC = sub?.buy_price ?? null;
+      const marginC = subSellC != null && bestPrice != null && bestPrice > 0
+        ? ((subSellC - bestPrice) / subSellC * 100).toFixed(1)
+        : null;
+      const subiektSectionC = `
+<div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
+  <div style="font-size:.72rem;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0">📦 Nasz Subiekt</div>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:.82rem">
+    <div><span style="color:var(--text-muted)">Status: </span>${subAvailC}</div>
+    ${subStockC != null ? `<div><span style="color:var(--text-muted)">Stan mag.: </span>${subStockHtmlC}</div>` : ''}
+    ${subSellC != null ? `<div><span style="color:var(--text-muted)">Cena sprzedaży: </span><strong style="color:var(--text-primary)">${fmtPLN(subSellC)}</strong></div>` : ''}
+    ${subBuyC != null ? `<div><span style="color:var(--text-muted)">Cena zakupu: </span><strong>${fmtPLN(subBuyC)}</strong></div>` : ''}
+    ${marginC != null ? `<div><span style="color:var(--text-muted)">Marża: </span><strong style="color:${parseFloat(marginC) > 0 ? '#10b981' : '#ef4444'}">${marginC}%</strong></div>` : ''}
+  </div>
+</div>`;
+      const rows = prices.length ? prices.map((o) => {
+        const isBest = o.price_pln === bestPrice;
+        const qty = o.stock_quantity;
+        const av = o.availability;
+        const avail = av === 'available' || (qty != null && qty > 0)
+          ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
+          : av === 'unavailable'
+            ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
+            : '<span class="avail-badge avail-unk" style="color:#94a3b8">— Brak danych</span>';
+        let stockCell;
+        if (qty != null && qty > 0) {
+          const color = qty > 5 ? '#10b981' : '#f59e0b';
+          stockCell = `<span style="color:${color};font-weight:600">${qty} szt</span>`;
+        } else if (qty === 0 || av === 'unavailable') {
+          stockCell = '<span style="color:#f87171;font-weight:600">0</span>';
+        } else if (av === 'available') {
+          stockCell = '<span style="color:#10b981;font-size:.78rem">dostępny</span>';
+        } else {
+          stockCell = '<span style="color:#94a3b8">—</span>';
+        }
+        return `<tr${isBest ? ' class="best-row"' : ''}>
+          <td>${isBest ? '<strong>' : ''}${escHtml(o.supplier_name)}${isBest ? '</strong>' : ''}</td>
+          <td class="price-cell" style="font-family:monospace;font-weight:600">${o.price_pln ? o.price_pln.toFixed(2) + ' zł' : '—'}</td>
+          <td style="text-align:right">${stockCell}</td>
+          <td>${avail}</td>
+        </tr>`;
+      }).join('')
+      : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert</td></tr>';
+
+      Modal.show({
+        title: `💰 Ceny hurtowni — ${escHtml(name || ean)}`,
+        body: `
+<div style="margin-bottom:12px;font-size:.82rem;color:var(--text-secondary)">
+  EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong>
+</div>
+${subiektSectionC}
+<div style="overflow-x:auto">
+<table class="compare-table" style="min-width:380px">
+  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th style="text-align:right">Magazyn</th><th>Dostępność</th></tr></thead>
+  <tbody>${rows}</tbody>
+</table></div>
+<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
+  Sortowanie: cena rosnąco (najtańsza na górze)
+</div>`,
+        footer: '<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>',
+      });
+    } catch (e) {
+      Toast.error('Błąd: ' + e.message);
     }
   }
 
@@ -4566,7 +4661,7 @@ ${refNote}
       });
 
       document.querySelectorAll('#mis-table .price-clickable[data-ean]').forEach(td => {
-        td.addEventListener('click', () => _showProductDetail(td.dataset.ean));
+        td.addEventListener('click', () => showCatalogPricesModal(td.dataset.ean, td.closest('tr')?.querySelector('.name-dblclick')?.getAttribute('title') || td.dataset.ean));
       });
       document.querySelectorAll('#mis-table .name-dblclick[data-ean]').forEach(td => {
         td.addEventListener('dblclick', () => _showProductDetail(td.dataset.ean));
@@ -4804,79 +4899,6 @@ ${refNote}
     } catch(e) { el.innerHTML = `<div class="sourcing-empty"><span class="empty-icon">⚠️</span><h3>Blad</h3><p>${escHtml(e.message)}</p></div>`; }
   }
 
-  /* â”€â”€ expose public API â”€â”€ */
-  /* ═══════════════════════════════════════════════════════
-     MODAL: Ceny w hurtowniach (klik na cenę)
-  ═══════════════════════════════════════════════════════ */
-  function showSupplierPricesModal(ean, data) {
-    if (!data) return;
-    const row = data.rows.find(r => r.ean === ean);
-    if (!row) return;
-    const { suppliers } = data;
-
-    // Zbierz wszystkie oferty dla EAN
-    const offers = [];
-    for (const s of suppliers) {
-      const sp = row.supplier_prices?.[s.id];
-      if (!sp) continue;
-      offers.push({
-        supplier: s.name,
-        supplier_id: s.id,
-        price: sp.price,
-        orig_price: sp.orig_price,
-        currency: sp.currency || s.currency || 'PLN',
-        availability: sp.availability,
-      });
-    }
-
-    // Sortuj: dostępne najpierw, potem wg ceny ASC
-    offers.sort((a, b) => {
-      const aAvail = a.availability === 'available' ? 0 : 1;
-      const bAvail = b.availability === 'available' ? 0 : 1;
-      if (aAvail !== bAvail) return aAvail - bAvail;
-      return (a.price || 0) - (b.price || 0);
-    });
-
-    const sigMap = {green:'🟢',yellow:'🟡',red:'🔴',none:'—'};
-    const sigTitle = {green:'Opłacalne (Kup taniej)',yellow:'Neutralne (Podobna cena)',red:'Drożej (Nie opłaca się)',none:'Brak analizy'};
-
-    const rows = offers.length ? offers.map((o, i) => {
-      const avail = o.availability === 'available'
-        ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
-        : o.availability === 'unavailable'
-          ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
-          : '<span class="avail-badge avail-unk">âť“ Nieznana</span>';
-      const isBest = o.price === Math.min(...offers.filter(x=>x.availability==='available').map(x=>x.price));
-      const origInfo = o.orig_price && o.currency !== 'PLN'
-        ? `<div style="font-size:.72rem;color:var(--text-muted)">${parseFloat(o.orig_price).toFixed(2)} ${o.currency}</div>` : '';
-      return `<tr${i===0?' class="best-row"':''}>
-        <td>${i===0&&o.availability==='available'?'â­ ':''}${escHtml(o.supplier)}</td>
-        <td class="price-cell">${fmtPLN(o.price)}${origInfo}</td>
-        <td>${avail}</td>
-      </tr>`;
-    }).join('')
-    : `<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert dla tego EAN</td></tr>`;
-
-    Modal.show({
-      title: `💰 Oferty hurtowni — ${escHtml(row.name || ean)}`,
-      body: `
-<div style="margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap;font-size:.82rem;color:var(--text-secondary)">
-  <span>EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong></span>
-  <span>Cena zakupu: <strong style="color:var(--text-primary)">${fmtPLN(row.buy_price)}</strong></span>
-  <span>Sygnał: <strong title="${sigTitle[row.signal]||''}">${sigMap[row.signal]||'—'}</strong></span>
-</div>
-<div style="overflow-x:auto">
-<table class="compare-table" style="min-width:340px">
-  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th>Dostępność</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table></div>
-<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
-  Sortowanie: dostępne najpierw → cena rosnąco
-</div>`,
-      footer: `<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>`,
-    });
-  }
-
   /* ═══════════════════════════════════════════════════════
      MODAL: Szczegóły produktu (dwuklik na nazwę)
   ═══════════════════════════════════════════════════════ */
@@ -4937,6 +4959,8 @@ ${refNote}
   }).join('')}
 </div>` : '';
 
+    const sigMap = {green:'🟢',yellow:'🟡',red:'🔴',none:'—'};
+    const sigTitle = {green:'Opłacalne (Kup taniej)',yellow:'Neutralne (Podobna cena)',red:'Drożej (Nie opłaca się)',none:'Brak analizy'};
     document.getElementById('prod-modal-body').innerHTML = `
 <div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
   <div style="flex-shrink:0">${imgHtml}</div>
@@ -5452,7 +5476,7 @@ ${offersHtml}`;
   /* ═══════════════════════════════════════════════════════
      TAB 8 — CATALOG MASTER (zunifikowany katalog)
   ═══════════════════════════════════════════════════════ */
-  let catPage = 1, catSearch = '', catMfg = '', catMfgSearch = '', catSupplier = '', catInSubiekt = '', catCondition = 'new', catAvail = 'available';
+  let catPage = 1, catSearch = '', catMfg = '', catMfgSearch = '', catSupplier = '', catInSubiekt = '', catCondition = '', catAvail = 'available';
   let catSort = 'last_updated', catOrder = 'desc', catLimit = 50;
   let catSelectedSuppliers = []; // multi-checkbox supplier IDs
   let catAttrFilters = {}; // { attrId: value } for dynamic attr filters
@@ -5465,6 +5489,36 @@ ${offersHtml}`;
   let catTreeSearchVal = '';         // tree search query
   let _catLastRender = null;         // { html, ts } — cached last rendered HTML for instant tab revisit
 
+  function _isRealCatId(id) {
+    const n = Number(id);
+    return Number.isFinite(n) && n > 0;
+  }
+
+  function _syncActiveCatId(id) {
+    if (id === '' || id == null) {
+      catSelectedCategoryId = null;
+      window.catCategoryId = null;
+      catSelectedIsUnmapped = false;
+    } else if (id === 'unmapped') {
+      catSelectedCategoryId = 'unmapped';
+      window.catCategoryId = 'unmapped';
+      catSelectedIsUnmapped = true;
+    } else {
+      catSelectedCategoryId = id;
+      window.catCategoryId = id;
+      catSelectedIsUnmapped = false;
+    }
+    return catSelectedCategoryId;
+  }
+
+  function _activeCatId() {
+    const raw = (catSelectedCategoryId != null && catSelectedCategoryId !== '')
+      ? catSelectedCategoryId
+      : (window.catCategoryId || '');
+    if (raw === 'unmapped') return 'unmapped';
+    return raw || '';
+  }
+
   /* ── Fast partial refresh: only updates products table, keeps sidebar ── */
   async function _refreshCatalogProducts() {
     const area = document.getElementById('cat-products-area');
@@ -5476,7 +5530,7 @@ ${offersHtml}`;
       tbody.innerHTML = Array(10).fill(`<tr>${Array(7).fill('<td><div class="sk-cell" style="height:12px;border-radius:3px"></div></td>').join('')}</tr>`).join('');
     }
 
-    const activeCatId = catSelectedCategoryId || window.catCategoryId || '';
+    const activeCatId = _activeCatId();
     let catUrl = `/sourcing/catalog?page=${catPage}&limit=${catLimit}&search=${encodeURIComponent(catSearch)}&manufacturer=${encodeURIComponent(catMfg)}&manufacturerSearch=${encodeURIComponent(catMfgSearch)}&categoryId=${activeCatId}&sort=${catSort}&order=${catOrder}&inSubiekt=${catInSubiekt}&condition=${encodeURIComponent(catCondition)}&availability=${encodeURIComponent(catAvail)}`;
     if (catSelectedSuppliers.length > 0) catUrl += `&supplierIds=${encodeURIComponent(JSON.stringify(catSelectedSuppliers))}`;
     else if (catSupplier) catUrl += `&supplier=${encodeURIComponent(catSupplier)}`;
@@ -5536,8 +5590,7 @@ ${offersHtml}`;
     let stats = {}, data = {}, manufacturers = [], categories = [];
     try {
       // Build query with multi-supplier and attr filters
-      // Use catSelectedCategoryId for tree-based filtering (overrides old catCategoryId)
-      const activeCatId = catSelectedCategoryId || window.catCategoryId || '';
+      const activeCatId = _activeCatId();
       let catUrl = `/sourcing/catalog?page=${catPage}&limit=${catLimit}&search=${encodeURIComponent(catSearch)}&manufacturer=${encodeURIComponent(catMfg)}&manufacturerSearch=${encodeURIComponent(catMfgSearch)}&categoryId=${activeCatId}&sort=${catSort}&order=${catOrder}&inSubiekt=${catInSubiekt}&condition=${encodeURIComponent(catCondition)}&availability=${encodeURIComponent(catAvail)}`;
       if (catSelectedSuppliers.length > 0) {
         catUrl += `&supplierIds=${encodeURIComponent(JSON.stringify(catSelectedSuppliers))}`;
@@ -5572,8 +5625,7 @@ ${offersHtml}`;
       const needTree = !catTreeData;
       if (needTree) fetchPromises.push(API.get('/sourcing/catalog/category-tree').catch(() => null));
 
-      // Also fetch attributes + filters in parallel if a category is selected
-      const catIdForAttrs = window.catCategoryId;
+      const catIdForAttrs = (activeCatId && activeCatId !== 'unmapped') ? activeCatId : '';
       if (catIdForAttrs) {
         fetchPromises.push(API.get(`/sourcing/catalog/categories/${catIdForAttrs}/attributes`).catch(() => []));
         fetchPromises.push(API.get(`/sourcing/catalog/categories/${catIdForAttrs}/filters`).catch(() => []));
@@ -5589,7 +5641,12 @@ ${offersHtml}`;
       if (!cachedStats) setTabCache('cat:stats', stats);
       if (!cachedMfg) setTabCache('cat:mfg', manufacturers);
       if (!cachedCats) setTabCache('cat:cats', categories);
-      if (needTree) catTreeData = results[4];
+      if (needTree) {
+        catTreeData = results[4];
+        window.catTreeData = catTreeData;
+      } else {
+        window.catTreeData = catTreeData;
+      }
 
       // Extract pre-fetched attributes + filters
       var prefetchedAttrs = catIdForAttrs ? results[needTree ? 5 : 4] : null;
@@ -5744,10 +5801,11 @@ ${offersHtml}`;
   <div style="display:flex;align-items:center;gap:6px;border-left:1px solid var(--border);padding-left:12px;margin-left:auto">
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:var(--accent)" onclick="SourcingView._showDuplicates()" title="Menedżer Duplikatów">🔍 Skan</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#10b981" onclick="SourcingView._batchGenAttrs()" title="Generuj filtry AI">🤖 Filtry</button>
+    <button class="btn btn--ghost btn--sm" style="font-size:.76rem" onclick="SourcingView._syncCatalogAttrs()" title="Uzupełnij cechy produktów z hurtowni do katalogu Master">🧩 Cechy z hurtowni</button>
     <button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#f59e0b" onclick="SourcingView._batchNormalize()" title="Normalizuj nazwy AI">📝 Nazwy</button>
-    ${window.catCategoryId ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#8b5cf6" onclick="SourcingView._showNamingSchemaModal(${window.catCategoryId})" title="Schemat nazwy">📐 Schemat</button>` : ''}
+    ${_isRealCatId(window.catCategoryId) ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;color:#8b5cf6" onclick="SourcingView._showNamingSchemaModal(${Number(window.catCategoryId)})" title="Schemat nazwy">📐 Schemat</button>` : ''}
   </div>
-  ${window.catCategoryId ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;border-left:1px solid var(--border);border-radius:0;margin-left:6px;padding-left:12px" onclick="SourcingView._editFilters(${window.catCategoryId})">✏️ Edytuj filtry</button>` : ''}
+  ${_isRealCatId(window.catCategoryId) ? `<button class="btn btn--ghost btn--sm" style="font-size:.76rem;border-left:1px solid var(--border);border-radius:0;margin-left:6px;padding-left:12px" onclick="SourcingView._editFilters(${Number(window.catCategoryId)})">✏️ Edytuj filtry</button>` : ''}
   <span style="font-size:.82rem;color:var(--text-muted);margin-left:12px">${data.total || 0} wyników | str. ${data.page}/${data.pages || 1}</span>
 </div>
 
@@ -5822,7 +5880,11 @@ ${offersHtml}`;
         : '—';
       // Name display: normalized > original, with tooltip for originals
       const displayName = p.normalized_name || p.name || '—';
-      const origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+      let origNames = {};
+      try {
+        origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+        if (!origNames || typeof origNames !== 'object' || Array.isArray(origNames)) origNames = {};
+      } catch (_) { origNames = {}; }
       const origTooltip = Object.entries(origNames).map(([k,v]) => `[${k}]: ${v}`).join('\n');
       const nameLockedIcon = p.name_locked ? ' 🔒' : '';
       const nameHtml = p.normalized_name 
@@ -6039,7 +6101,7 @@ ${offersHtml}`;
         renderCatalog();
       });
     });
-    document.getElementById('cat-category')?.addEventListener('change', e => { window.catCategoryId = e.target.value; window._catCatSearchVal = ''; catPage = 1; catAttrFilters = {}; renderCatalog(); });
+    document.getElementById('cat-category')?.addEventListener('change', e => { _syncActiveCatId(e.target.value || null); window._catCatSearchVal = ''; catPage = 1; catAttrFilters = {}; renderCatalog(); });
     document.getElementById('cat-in-subiekt')?.addEventListener('change', e => { catInSubiekt = e.target.value; catPage = 1; renderCatalog(); });
     document.getElementById('cat-condition')?.addEventListener('change', e => { catCondition = e.target.value; catPage = 1; renderCatalog(); });
     document.getElementById('cat-avail')?.addEventListener('change', e => { catAvail = e.target.value; catPage = 1; renderCatalog(); });
@@ -6179,7 +6241,7 @@ ${offersHtml}`;
               item.addEventListener('click', () => {
                 const id = item.dataset.id;
                 const name = item.dataset.name;
-                window.catCategoryId = id;
+                _syncActiveCatId(id);
                 window._catCatSearchVal = name;
                 catCatSearchInput.value = name;
                 catSuggestBox.style.display = 'none';
@@ -6206,94 +6268,8 @@ ${offersHtml}`;
       });
     });
 
-    // Click on price — show supplier prices modal
     el.querySelectorAll('.cat-price-click').forEach(span => {
-      span.addEventListener('click', async () => {
-        const ean = span.dataset.ean;
-        const name = span.dataset.name;
-        try {
-          const result = await API.get(`/sourcing/catalog/prices/${encodeURIComponent(ean)}`);
-          const prices = result.prices || [];
-          const sub = result.subiekt || null;
-          const bestPrice = prices.find(p => p.price_pln > 0)?.price_pln || null;
-
-          // ── Subiekt section ──────────────────────────────────────────
-          const subAvailC = sub
-            ? `<span style="color:#10b981;font-weight:600">✅ W ofercie</span>`
-            : `<span style="color:#94a3b8">— Brak w Subiekcie</span>`;
-          const subStockC = sub?.stock ?? null;
-          const subStockHtmlC = subStockC != null
-            ? (subStockC > 10 ? `<span style="color:#10b981">${subStockC} szt</span>`
-              : subStockC > 0 ? `<span style="color:#f59e0b">${subStockC} szt (mało)</span>`
-              : `<span style="color:#ef4444">0 szt (brak)</span>`)
-            : `<span style="color:#94a3b8">—</span>`;
-          const subSellC = sub?.sell_price ?? null;
-          const subBuyC = sub?.buy_price ?? null;
-          const marginC = subSellC != null && bestPrice != null && bestPrice > 0
-            ? ((subSellC - bestPrice) / subSellC * 100).toFixed(1)
-            : null;
-          const subiektSectionC = `
-<div style="background:rgba(16,185,129,.07);border:1px solid rgba(16,185,129,.2);border-radius:10px;padding:10px 14px;margin-bottom:12px;display:flex;flex-wrap:wrap;gap:16px;align-items:center">
-  <div style="font-size:.72rem;font-weight:700;color:#10b981;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0">📦 Nasz Subiekt</div>
-  <div style="display:flex;flex-wrap:wrap;gap:12px;font-size:.82rem">
-    <div><span style="color:var(--text-muted)">Status: </span>${subAvailC}</div>
-    ${subStockC != null ? `<div><span style="color:var(--text-muted)">Stan mag.: </span>${subStockHtmlC}</div>` : ''}
-    ${subSellC != null ? `<div><span style="color:var(--text-muted)">Cena sprzedaży: </span><strong style="color:var(--text-primary)">${fmtPLN(subSellC)}</strong></div>` : ''}
-    ${subBuyC != null ? `<div><span style="color:var(--text-muted)">Cena zakupu: </span><strong>${fmtPLN(subBuyC)}</strong></div>` : ''}
-    ${marginC != null ? `<div><span style="color:var(--text-muted)">Marża: </span><strong style="color:${parseFloat(marginC) > 0 ? '#10b981' : '#ef4444'}">${marginC}%</strong></div>` : ''}
-  </div>
-</div>`;
-
-          const rows = prices.length ? prices.map((o, i) => {
-            const isBest = o.price_pln === bestPrice;
-            const qty = o.stock_quantity;
-            const av = o.availability;
-            // Availability badge
-            const avail = av === 'available' || (qty != null && qty > 0)
-              ? '<span class="avail-badge avail-ok">✅ Dostępny</span>'
-              : av === 'unavailable'
-                ? '<span class="avail-badge avail-no">❌ Niedostępny</span>'
-                : '<span class="avail-badge avail-unk" style="color:#94a3b8">— Brak danych</span>';
-            // Stock number
-            let stockCell;
-            if (qty != null && qty > 0) {
-              const color = qty > 5 ? '#10b981' : '#f59e0b';
-              stockCell = `<span style="color:${color};font-weight:600">${qty} szt</span>`;
-            } else if (qty === 0 || av === 'unavailable') {
-              stockCell = '<span style="color:#f87171;font-weight:600">0</span>';
-            } else if (av === 'available') {
-              stockCell = '<span style="color:#10b981;font-size:.78rem">dostępny</span>';
-            } else {
-              stockCell = '<span style="color:#94a3b8">—</span>';
-            }
-            return `<tr${isBest ? ' class="best-row"' : ''}>
-              <td>${isBest ? '<strong>' : ''}${escHtml(o.supplier_name)}${isBest ? '</strong>' : ''}</td>
-              <td class="price-cell" style="font-family:monospace;font-weight:600">${o.price_pln ? o.price_pln.toFixed(2) + ' zł' : '—'}</td>
-              <td style="text-align:right">${stockCell}</td>
-              <td>${avail}</td>
-            </tr>`;
-          }).join('')
-          : '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--text-muted)">Brak ofert</td></tr>';
-
-          Modal.show({
-            title: `💰 Ceny hurtowni — ${escHtml(name || ean)}`,
-            body: `
-<div style="margin-bottom:12px;font-size:.82rem;color:var(--text-secondary)">
-  EAN: <strong style="color:var(--text-primary);font-family:monospace">${escHtml(ean)}</strong>
-</div>
-${subiektSectionC}
-<div style="overflow-x:auto">
-<table class="compare-table" style="min-width:380px">
-  <thead><tr><th>Hurtownia</th><th>Cena PLN</th><th style="text-align:right">Magazyn</th><th>Dostępność</th></tr></thead>
-  <tbody>${rows}</tbody>
-</table></div>
-<div style="font-size:.72rem;color:var(--text-muted);margin-top:10px">
-  Sortowanie: cena rosnąco (najtańsza na górze)
-</div>`,
-            footer: '<button class="btn btn--secondary" onclick="Modal.hide()">Zamknij</button>',
-          });
-        } catch(e) { Toast.error('Błąd: ' + e.message); }
-      });
+      span.addEventListener('click', () => showCatalogPricesModal(span.dataset.ean, span.dataset.name));
     });
 
 
@@ -6619,9 +6595,7 @@ ${subiektSectionC}
                 clearTabCache('cat:stats');
 
                 // Automatically select the new category ID so user sees it
-                catSelectedCategoryId = res.id;
-                catSelectedIsUnmapped = false;
-                window.catCategoryId = res.id;
+                _syncActiveCatId(res.id);
 
                 // Rerender catalog to load and show the new category tree
                 renderCatalog();
@@ -7638,23 +7612,13 @@ ${subiektSectionC}
         e.stopPropagation();
         const id = el.dataset.id ? parseInt(el.dataset.id) : null;
         if (el.classList.contains('cat-tree-unmapped')) {
-          catSelectedIsUnmapped = true;
-          catSelectedCategoryId = 'unmapped'; 
+          _syncActiveCatId('unmapped');
         } else if (id === 0) {
-          // "Wszystkie" clicked - reset filters
-          catSelectedIsUnmapped = false;
-          catSelectedCategoryId = null;
-          window.catCategoryId = null;
+          _syncActiveCatId(null);
+        } else if (catSelectedCategoryId === id) {
+          _syncActiveCatId(null);
         } else {
-          catSelectedIsUnmapped = false;
-          // Toggle off if already selected
-          if (catSelectedCategoryId === id) {
-            catSelectedCategoryId = null;
-            window.catCategoryId = null;
-          } else {
-            catSelectedCategoryId = id;
-            window.catCategoryId = id; // sync with old var
-          }
+          _syncActiveCatId(id);
         }
         catPage = 1;
         renderCatalog();
@@ -7917,6 +7881,15 @@ ${subiektSectionC}
     } catch(e) { Toast.error('Błąd: ' + e.message); }
   }
 
+  async function _syncCatalogAttrs() {
+    try {
+      Toast.info('Scalam cechy z hurtowni do katalogu Master...');
+      const result = await API.post('/sourcing/catalog/sync-attributes', {});
+      Toast.success(`Uzupełniono ${result.filled || 0} cech (${result.raw_updated || 0} produktów z raw_attributes).`);
+      renderCatalog();
+    } catch (e) { Toast.error('Błąd: ' + e.message); }
+  }
+
   async function _showDuplicates(page = 1) {
     try {
       const data = await API.get(`/sourcing/catalog/duplicates?page=${page}&limit=10`);
@@ -8008,7 +7981,11 @@ ${subiektSectionC}
   }
 
   async function _showNamingSchemaModal(categoryId) {
-    if (!categoryId) return;
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     try {
       const schema = await API.get(`/sourcing/catalog/naming-schema/${categoryId}`);
       const params = schema.params || [];
@@ -8183,6 +8160,7 @@ ${subiektSectionC}
       const detail = await API.get(`/sourcing/catalog/product/${productId}`);
       if (!detail || !detail.product) { Toast.error('Nie znaleziono produktu'); return; }
       const p = detail.product;
+      const catalogId = p.id;
       const attrs = detail.attributes || [];
       const prices = detail.prices || [];
       const sub = detail.subiekt;
@@ -8213,10 +8191,10 @@ ${subiektSectionC}
           <tbody>${attrs.map(a => `<tr>
             <td class="prod-attr-name">${escHtml(a.attr_name)}</td>
             <td class="prod-attr-value">
-              <input class="prod-attr-input" value="${escHtml(a.value_text||'')}" data-attr-id="${a.attr_id}" data-catalog-id="${productId}" placeholder="Ustaw wartość...">
+              <input class="prod-attr-input" value="${escHtml(a.value_text||'')}" data-attr-id="${a.attr_id}" data-catalog-id="${catalogId}" placeholder="Ustaw wartość...">
             </td>
             <td>${a.attr_unit ? `<span class="prod-attr-unit">${escHtml(a.attr_unit)}</span>` : '—'}</td>
-            <td><button class="prod-attr-save" onclick="SourcingView._saveAttrValue(${productId}, ${a.attr_id}, this)">💾</button></td>
+            <td><button class="prod-attr-save" onclick="SourcingView._saveAttrValue(${catalogId}, ${a.attr_id}, this)">💾</button></td>
           </tr>`).join('')}</tbody>
         </table>`;
       } else {
@@ -8271,7 +8249,11 @@ ${subiektSectionC}
       </table></div>` : '<div style="text-align:center;color:var(--text-muted);padding:12px;font-size:.82rem">Brak danych cenowych</div>';
 
       // Original names
-      const origNames = p.original_names || {};
+      let origNames = {};
+      try {
+        origNames = typeof p.original_names === 'string' ? JSON.parse(p.original_names || '{}') : (p.original_names || {});
+        if (!origNames || typeof origNames !== 'object' || Array.isArray(origNames)) origNames = {};
+      } catch (_) { origNames = {}; }
       const origNamesHtml = Object.keys(origNames).length > 0 ? `<div style="max-height:120px;overflow-y:auto">
         ${Object.entries(origNames).map(([sup, name]) => `<div class="prod-info-row"><span class="prod-info-label" style="min-width:80px">${escHtml(sup)}:</span> <span style="font-size:.78rem;color:var(--text-secondary);word-break:break-all">${escHtml(name)}</span></div>`).join('')}
       </div>` : '<div style="color:var(--text-muted);font-size:.82rem">Brak danych</div>';
@@ -8406,7 +8388,7 @@ ${subiektSectionC}
       const res = await API.post(`/sourcing/catalog/product/${catalogId}/unify-attributes`);
       Toast.success(res.message || 'Cechy zostały pomyślnie zunifikowane!');
       // Odśwież widok szczegółów produktu
-      _showProductDetails(catalogId);
+      _showProductDetail(catalogId);
     } catch (e) {
       Toast.error('Błąd unifikacji: ' + e.message);
       btn.innerHTML = originalText;
@@ -8417,6 +8399,11 @@ ${subiektSectionC}
 
   // ─── Katalog Master Full: Filter Editor Modal ───────────────────────
   async function _editFilters(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     try {
       const allAttrs = await API.get(`/sourcing/catalog/categories/${categoryId}/all-attributes`);
 
@@ -8450,6 +8437,11 @@ ${subiektSectionC}
   }
 
   async function _saveFilters(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     const rows = document.querySelectorAll('.filter-editor-row');
     const filterAttrIds = [];
     for (const row of rows) {
@@ -8457,11 +8449,14 @@ ${subiektSectionC}
       const unitInput = row.querySelector('.filter-editor-unit-input');
       const attrId = parseInt(row.dataset.attrId);
       if (cb && cb.checked) filterAttrIds.push(attrId);
-      // Save unit changes
       if (unitInput) {
         const origUnit = unitInput.defaultValue || '';
         if (unitInput.value !== origUnit) {
-          try { await API.patch(`/sourcing/catalog/categories/attributes/${attrId}`, { attr_unit: unitInput.value || null }); } catch(_) {}
+          try {
+            await API.patch(`/sourcing/catalog/categories/attributes/${attrId}`, { attr_unit: unitInput.value || null });
+          } catch (e) {
+            Toast.error('Nie zapisano jednostki: ' + e.message);
+          }
         }
       }
     }
@@ -8475,6 +8470,11 @@ ${subiektSectionC}
   }
 
   async function _addNewAttr(categoryId) {
+    if (!_isRealCatId(categoryId)) {
+      Toast.error('Wybierz konkretną kategorię z drzewa (nie „Nieprzypisane”).');
+      return;
+    }
+    categoryId = Number(categoryId);
     const nameInput = document.getElementById('fe-new-name');
     const unitInput = document.getElementById('fe-new-unit');
     if (!nameInput || !nameInput.value.trim()) { Toast.error('Podaj nazwę parametru'); return; }
@@ -8501,8 +8501,8 @@ ${subiektSectionC}
 
   function _catSelectAllSup(selectAll) {
     if (selectAll) {
-      const labels = document.querySelectorAll('#cat-supplier-panel .cat-supplier-cb');
-      catSelectedSuppliers = Array.from(labels).map(l => l.dataset.sup).filter(Boolean);
+      const boxes = document.querySelectorAll('.cat-multi-cb-sup');
+      catSelectedSuppliers = Array.from(boxes).map(cb => cb.value).filter(Boolean);
     } else {
       catSelectedSuppliers = [];
     }
@@ -9620,6 +9620,7 @@ ${subiektSectionC}
     _catPageTo,
     _generateAttrs,
     _batchGenAttrs,
+    _syncCatalogAttrs,
     _showDuplicates,
     _scanDuplicates,
     _resolveDuplicate,
@@ -9638,6 +9639,8 @@ ${subiektSectionC}
     _saveInlineMfgCode,
     _editFilters,
     _saveFilters,
+    _addNewAttr,
+    _isRealCatId,
     _deleteAttr,
     _catSelectAllSup,
     _setAbSupplier,

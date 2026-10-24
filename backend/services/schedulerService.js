@@ -41,6 +41,12 @@ function registerJob(supplier) {
   const task = cron.schedule(expr, async () => {
     console.log(`[scheduler] ▶ Auto-refresh hurtowni "${supplier.name}" (ID ${id}) ...`);
     try {
+      if (svc.isSupplierRefreshing && svc.isSupplierRefreshing(id)) {
+        console.log(`[scheduler] ⏭ "${supplier.name}" — pominięto, odświeżanie już trwa`);
+        svc.addLog({ supplier_id: id, action: 'auto_refresh', status: 'warn',
+          details: 'Pominięto: poprzedni cykl jeszcze trwa' });
+        return;
+      }
       const result = await svc.refreshSupplier(id);
       svc.markScheduledRun(id);
       svc.addLog({ supplier_id: id, action: 'auto_refresh', status: 'ok',
@@ -86,11 +92,17 @@ function registerFileJob(file) {
   const task = cron.schedule(expr, async () => {
     console.log(`[scheduler] ▶ Auto-refresh pliku (ID ${fid}) ...`);
     try {
-      const result = await svc.refreshOneSupplierFile(fid);
+      if (svc.isSupplierRefreshing && svc.isSupplierRefreshing(file.supplier_id)) {
+        console.log(`[scheduler] ⏭ Plik ID ${fid} — pominięto, odświeżanie hurtowni już trwa`);
+        svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'warn',
+          details: `Plik ID ${fid}: pominięto, poprzedni cykl jeszcze trwa` });
+        return;
+      }
+      const result = await svc.refreshSupplier(file.supplier_id);
       svc.markFileScheduledRun(fid);
       svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'ok',
-        details: `Harmonogram pliku (${file.label}): wczytano ${result.products.length} SKU` });
-      console.log(`[scheduler] ✅ Plik ID ${fid} — ${result.products.length} SKU`);
+        details: `Harmonogram pliku (${file.label}): scalono ${result.imported} SKU i przebudowano katalog` });
+      console.log(`[scheduler] ✅ Plik ID ${fid} — ${result.imported} SKU + katalog`);
     } catch (err) {
       svc.addLog({ supplier_id: file.supplier_id, action: 'auto_refresh', status: 'error', details: `Plik ID ${fid}: ${err.message}` });
       console.error(`[scheduler] ❌ Plik ID ${fid}: ${err.message}`);

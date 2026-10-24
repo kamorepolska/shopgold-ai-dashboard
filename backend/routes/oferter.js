@@ -1,79 +1,46 @@
 const express = require('express');
 const router = express.Router();
 const { complete } = require('../services/aiService');
+const { eanVariants, normalizeEan } = require('../services/eanUtil');
+const attrSync = require('../services/catalogAttrSync');
 
 function getDb() {
   const svc = require('../services/sourcingService');
   return svc.getDb();
 }
 
-// ─── PC COMPONENT ATTRIBUTE DEFINITIONS ───────────────────────────────────────
+function offerMatchSql(alias, catalogEanExpr = 'cm.canonical_ean') {
+  return `(COALESCE(NULLIF(${alias}.normalized_ean, ''), normalize_ean(${alias}.ean)) = normalize_ean(${catalogEanExpr}))`;
+}
 
-const PC_ATTR_SCHEMA = {
-  'procesor': [
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Liczba rdzeni', type: 'numeric', unit: null },
-    { name: 'Zintegrowana grafika', type: 'text', unit: null },
-    { name: 'Typ pamieci RAM', type: 'text', unit: null },
-    { name: 'Maks. taktowanie RAM', type: 'numeric', unit: 'MHz' },
-  ],
-  'plyta glowna': [
-    { name: 'Socket', type: 'text', unit: null },
-    { name: 'Chipset', type: 'text', unit: null },
-    { name: 'Format', type: 'text', unit: null },
-    { name: 'Typ pamieci RAM', type: 'text', unit: null },
-    { name: 'Sloty RAM', type: 'numeric', unit: null },
-    { name: 'Sloty M.2', type: 'numeric', unit: null },
-    { name: 'WiFi', type: 'text', unit: null },
-  ],
-  'chlodzenie': [
-    { name: 'Typ chlodzenia', type: 'text', unit: null },
-    { name: 'Max TDP', type: 'numeric', unit: 'W' },
-    { name: 'Kompatybilne sockety', type: 'text', unit: null },
-    { name: 'Wysokosc', type: 'numeric', unit: 'mm' },
-    { name: 'Rozmiar radiatora', type: 'text', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'pamiec ram': [
-    { name: 'Typ', type: 'text', unit: null },
-    { name: 'Pojemnosc', type: 'numeric', unit: 'GB' },
-    { name: 'Taktowanie', type: 'numeric', unit: 'MHz' },
-    { name: 'Liczba kosci', type: 'numeric', unit: null },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'dysk': [
-    { name: 'Typ dysku', type: 'text', unit: null },
-    { name: 'Pojemnosc', type: 'numeric', unit: 'GB' },
-    { name: 'Interfejs', type: 'text', unit: null },
-  ],
-  'karta graficzna': [
-    { name: 'Chip', type: 'text', unit: null },
-    { name: 'VRAM', type: 'numeric', unit: 'GB' },
-    { name: 'TDP', type: 'numeric', unit: 'W' },
-    { name: 'Dlugosc karty', type: 'numeric', unit: 'mm' },
-    { name: 'RGB', type: 'text', unit: null },
-  ],
-  'zasilacz': [
-    { name: 'Moc', type: 'numeric', unit: 'W' },
-    { name: 'Certyfikacja', type: 'text', unit: null },
-    { name: 'Modularnosc', type: 'text', unit: null },
-  ],
-  'obudowa': [
-    { name: 'Format plyty', type: 'text', unit: null },
-    { name: 'Maks. wys. chlodzenia', type: 'numeric', unit: 'mm' },
-    { name: 'Obsluga AIO', type: 'text', unit: null },
-    { name: 'Maks. dl. karty graficznej', type: 'numeric', unit: 'mm' },
-    { name: 'Kolor', type: 'text', unit: null },
-    { name: 'RGB', type: 'text', unit: null },
-    { name: 'Szyba hartowana', type: 'text', unit: null },
-  ],
-  'system operacyjny': [
-    { name: 'Wersja', type: 'text', unit: null },
-    { name: 'Typ licencji', type: 'text', unit: null },
-  ],
-};
+function subiektJoinSql(alias = 'sp') {
+  return `LEFT JOIN subiekt_products ${alias} ON ${alias}.id = (
+    SELECT sp2.id FROM subiekt_products sp2
+    WHERE COALESCE(NULLIF(sp2.normalized_ean, ''), normalize_ean(sp2.ean)) = normalize_ean(cm.canonical_ean)
+    ORDER BY (sp2.stock IS NULL), sp2.stock DESC
+    LIMIT 1
+  )`;
+}
 
+function expandEans(eans) {
+  const set = new Set();
+  for (const e of eans || []) {
+    if (!e) continue;
+    eanVariants(e).forEach(v => set.add(v));
+    const n = normalizeEan(e);
+    if (n) set.add(n);
+  }
+  return [...set];
+}
+
+function firstMapHit(map, ean) {
+  if (!map) return undefined;
+  if (ean && map[ean]) return map[ean];
+  for (const k of expandEans([ean])) {
+    if (map[k]) return map[k];
+  }
+  return undefined;
+}
 
 function normalizeStr(s) {
   return (s || '').toLowerCase()
@@ -83,55 +50,79 @@ function normalizeStr(s) {
     .replace(/ü/g,'u').replace(/ö/g,'o').replace(/ä/g,'a').replace(/ß/g,'ss');
 }
 
+function isPcComponentName(name) {
+  const n = normalizeStr(name);
+  if (/alarm|pamieci masow|masow|karta pamiec|kart pamiec|obudow.{0,16}dysk|pendrive|flash|czytnik|tasm.?led|oswietl/.test(n)) return false;
+  return [
+    'procesor', 'plyt', 'chlodzen', 'wentylator', 'cooler', 'kuhler',
+    'pamiec ram', 'pamieci ram', 'dimm', 'arbeitsspeicher',
+    'dysk', 'ssd', 'hdd', 'nvme',
+    'karta graficzn', 'karty graficzn', 'gpu', 'grafikkarten',
+    'zasilacz', 'netzteil',
+    'obudow', 'gehause',
+    'system operac', 'operating system',
+    'cpu', 'mainboard', 'motherboard'
+  ].some(k => n.includes(k));
+}
+
+function pickComponentAttrs(compMap, keys) {
+  const folded = (keys || []).map(k => attrSync.fold(k));
+  const lookingRam = folded.some(k => k.includes('pamiec') || k === 'ram' || k.includes('dimm'));
+  const lookingMb = folded.some(k => k.includes('plyt') || k.includes('mainboard') || k.includes('motherboard'));
+  const lookingCase = folded.some(k => k.includes('obudow') || k === 'case' || k.includes('gehause'));
+  const specific = folded.filter(k => k.length >= 8);
+  const generic = folded.filter(k => k.length < 8);
+  let best = null, bestScore = 0;
+  for (const [name, attrs] of Object.entries(compMap || {})) {
+    const n = attrSync.fold(name);
+    if (/wentylator/.test(n) && /obudow|vga|case/.test(n)) continue;
+    if (lookingRam && /masow|flash|pendrive|czytnik/.test(n)) continue;
+    if (lookingMb && /dysk|hdd|ssd|nas/.test(n) && !/glown/.test(n)) continue;
+    if (lookingCase && /dysk|hdd|ssd|nas|zewnetrz|wentylator|fan/.test(n)) continue;
+    let score = 0;
+    if (specific.some(k => n.includes(k))) score = 5 + n.length / 100;
+    else if (generic.some(k => n.includes(k))) score = 1;
+    if (score > bestScore) { bestScore = score; best = attrs; }
+  }
+  return best;
+}
+
 // POST /api/oferter/setup/seed-attributes
 // Seeds category_attributes for all PC component categories found in product_categories
 router.post('/setup/seed-attributes', (req, res) => {
   try {
     const db = getDb();
+    const catalogSvc = require('../services/catalogService');
     const cats = db.prepare('SELECT id, name FROM product_categories').all();
     const results = [];
 
-    const insertAttr = db.prepare(`
-      INSERT OR IGNORE INTO category_attributes (category_id, attr_name, attr_type, attr_unit, sort_order)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    const categoryExactMap = {
-      'procesor': 'Procesory',
-      'plyta glowna': 'Płyty główne',
-      'chlodzenie': 'Chłodzenie',
-      'pamiec ram': 'Pamięci RAM',
-      'dysk': 'Dyski i SSD',
-      'karta graficzna': 'Karty graficzne',
-      'zasilacz': 'Zasilacze',
-      'obudowa': 'Obudowy',
-      'system operacyjny': 'Systemy operacyjne'
-    };
-
     const doSeed = db.transaction(() => {
       for (const cat of cats) {
-        const catName = cat.name.trim();
-        for (const [keyword, attrs] of Object.entries(PC_ATTR_SCHEMA)) {
-          const targetName = categoryExactMap[keyword];
-          if (targetName && catName.toLowerCase() === targetName.toLowerCase()) {
-            let added = 0;
-            attrs.forEach((a, i) => {
-              try {
-                const r = insertAttr.run(cat.id, a.name, a.type, a.unit, i);
-                if (r.changes) added++;
-              } catch(_) {}
-            });
-            if (added > 0) results.push({ category: cat.name, id: cat.id, added });
-          }
-        }
+        const schemaKey = attrSync.matchAttrMapKey(cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+        if (!schemaKey) continue;
+        const added = attrSync.seedCategoryAttrSchema(db, cat.id, cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+        if (added > 0) results.push({ category: cat.name, id: cat.id, added, schema: schemaKey });
       }
     });
 
-
     doSeed();
 
+    let sync = { products: 0, filled: 0, raw_updated: 0 };
+    try {
+      const catalogSvc = require('../services/catalogService');
+      sync = catalogSvc.syncCatalogAttributes(db, { seedSchemas: true });
+    } catch (e) {
+      console.warn('[oferter] sync attributes after seed:', e.message);
+    }
+
     const totalAdded = results.reduce((s, r) => s + r.added, 0);
-    res.json({ ok: true, seeded: results, totalAdded, message: `Dodano ${totalAdded} atrybutow w ${results.length} kategoriach` });
+    res.json({
+      ok: true,
+      seeded: results,
+      totalAdded,
+      sync,
+      message: `Dodano ${totalAdded} atrybutów w ${results.length} kategoriach. Uzupełniono ${sync.filled} cech z hurtowni (${sync.raw_updated} produktów z raw_attributes).`,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -149,10 +140,7 @@ router.get('/setup/status', (req, res) => {
       ORDER BY pc.name
     `).all();
 
-    const pcCats = cats.filter(c => {
-      const n = normalizeStr(c.name);
-      return ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => n.includes(k));
-    });
+    const pcCats = cats.filter(c => isPcComponentName(c.name));
 
     res.json({ ok: true, pc_categories: pcCats, total: pcCats.length });
   } catch (err) {
@@ -174,10 +162,25 @@ router.get('/setup/categories', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: isPcComponentName(c.name),
     }));
 
     res.json({ ok: true, categories: result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/setup/sync-attributes', (req, res) => {
+  try {
+    const db = getDb();
+    const catalogSvc = require('../services/catalogService');
+    const sync = catalogSvc.syncCatalogAttributes(db, { seedSchemas: true });
+    res.json({
+      ok: true,
+      ...sync,
+      message: `Uzupełniono ${sync.filled} cech w katalogu Master (${sync.raw_updated} produktów z raw_attributes).`,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -229,41 +232,53 @@ router.get('/components/:catId', (req, res) => {
     const db = getDb();
     const catId = parseInt(req.params.catId);
     const { search = '', limit = 50, offset = 0 } = req.query;
+    const scopeIds = attrSync.expandCategoryIds(db, [catId]);
+    const catScope = scopeIds.length ? scopeIds : [catId];
 
-    let where = 'cm.category_id = ?';
-    const params = [catId];
+    try {
+      const catalogSvc = require('../services/catalogService');
+      const scopeCats = db.prepare(
+        `SELECT id, name FROM product_categories WHERE id IN (${catScope.map(() => '?').join(',')})`
+      ).all(...catScope);
+      for (const cat of scopeCats) {
+        attrSync.seedCategoryAttrSchema(db, cat.id, cat.name, catalogSvc.CATEGORY_ATTR_MAP);
+      }
+    } catch (e) {
+      console.warn('[oferter] seed schema:', e.message);
+    }
+
+    let where = `cm.category_id IN (${catScope.map(() => '?').join(',')})`;
+    const params = [...catScope];
     if (search) { where += ' AND (cm.name LIKE ? OR cm.manufacturer LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
 
-    // Exclude completely dead products (no stock and no price)
-    where += ` AND (
-      sp.stock > 0 
-      OR sp.buy_price > 0 
-      OR (SELECT SUM(stock_quantity) FROM supplier_products sup WHERE sup.ean = cm.canonical_ean) > 0 
-      OR (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE sup2.ean = cm.canonical_ean AND sup2.price_pln > 0) > 0
+    // Tylko oferty hurtowni z ceną — sama cena Subiekta nie wystarcza
+    where += ` AND EXISTS (
+      SELECT 1 FROM supplier_products sup
+      WHERE ${offerMatchSql('sup')} AND sup.price_pln > 0
     )`;
 
     const products = db.prepare(`
       SELECT
         cm.id, cm.canonical_ean, cm.name, cm.manufacturer, cm.manufacturer_code,
-        cm.category_id, cm.category_name,
+        cm.category_id, cm.category_name, cm.raw_attributes,
         sp.stock AS subiekt_stock,
         sp.buy_price AS subiekt_buy_price,
         sp.sell_price AS subiekt_sell_price,
         COALESCE(
-          (SELECT MIN(price_pln) FROM supplier_products sup WHERE sup.ean = cm.canonical_ean AND sup.price_pln > 0 AND sup.stock_quantity > 0),
-          (SELECT MIN(price_pln) FROM supplier_products sup6 WHERE sup6.ean = cm.canonical_ean AND sup6.price_pln > 0)
+          (SELECT MIN(price_pln) FROM supplier_products sup WHERE ${offerMatchSql('sup')} AND sup.price_pln > 0 AND sup.stock_quantity > 0),
+          (SELECT MIN(price_pln) FROM supplier_products sup6 WHERE ${offerMatchSql('sup6')} AND sup6.price_pln > 0)
         ) AS best_supplier_price,
         COALESCE(
           sp.buy_price, 
-          (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE sup2.ean = cm.canonical_ean AND sup2.price_pln > 0 AND sup2.stock_quantity > 0),
-          (SELECT MIN(price_pln) FROM supplier_products sup5 WHERE sup5.ean = cm.canonical_ean AND sup5.price_pln > 0)
+          (SELECT MIN(price_pln) FROM supplier_products sup2 WHERE ${offerMatchSql('sup2')} AND sup2.price_pln > 0 AND sup2.stock_quantity > 0),
+          (SELECT MIN(price_pln) FROM supplier_products sup5 WHERE ${offerMatchSql('sup5')} AND sup5.price_pln > 0)
         ) AS effective_buy_price,
-        (SELECT SUM(stock_quantity) FROM supplier_products sup3 WHERE sup3.ean = cm.canonical_ean) AS supplier_stock
+        (SELECT SUM(stock_quantity) FROM supplier_products sup3 WHERE ${offerMatchSql('sup3')}) AS supplier_stock
       FROM catalog_master cm
-      LEFT JOIN subiekt_products sp ON sp.ean = cm.canonical_ean
+      ${subiektJoinSql('sp')}
       WHERE ${where}
       ORDER BY 
-        CASE WHEN (sp.stock > 0 OR (SELECT SUM(stock_quantity) FROM supplier_products sup4 WHERE sup4.ean = cm.canonical_ean) > 0) THEN 1 ELSE 2 END ASC,
+        CASE WHEN (sp.stock > 0 OR (SELECT SUM(stock_quantity) FROM supplier_products sup4 WHERE ${offerMatchSql('sup4')}) > 0) THEN 1 ELSE 2 END ASC,
         cm.name ASC
       LIMIT ? OFFSET ?
     `).all(...params, parseInt(limit), parseInt(offset));
@@ -271,11 +286,10 @@ router.get('/components/:catId', (req, res) => {
     const total = db.prepare(`
       SELECT COUNT(*) as cnt 
       FROM catalog_master cm 
-      LEFT JOIN subiekt_products sp ON sp.ean = cm.canonical_ean
+      ${subiektJoinSql('sp')}
       WHERE ${where}
     `).get(...params).cnt;
 
-    // 1. Pobierz cechy manualne (product_attributes) dla wszystkich produktów naraz
     const productIds = products.map(p => p.id);
     const eans = products.map(p => p.canonical_ean);
 
@@ -286,128 +300,69 @@ router.get('/components/:catId', (req, res) => {
         FROM product_attributes pa
         JOIN category_attributes ca ON ca.id = pa.attribute_id
         WHERE pa.catalog_id IN (${productIds.map(() => '?').join(',')})
-          AND ca.category_id = ?
-      `).all(...productIds, catId);
+      `).all(...productIds);
       for (const row of manualRows) {
         if (!manualAttrsMap[row.catalog_id]) manualAttrsMap[row.catalog_id] = {};
         manualAttrsMap[row.catalog_id][row.attr_name] = row;
       }
     }
 
-    // 2. JS-side alias mapping (eliminuje wolny LOWER JOIN)
+    const aliasMap = attrSync.loadAliasMaps(db);
+    try { attrSync.hydrateProductsRaw(db, products, aliasMap); } catch (e) {
+      console.warn('[oferter] hydrate raw:', e.message);
+    }
+
     const catAttrDefs = db.prepare(
-      'SELECT attr_name, attr_type, attr_unit FROM category_attributes WHERE category_id = ? ORDER BY sort_order, attr_name'
-    ).all(catId);
-    const catAttrByLower = {};
-    for (const def of catAttrDefs) catAttrByLower[def.attr_name.toLowerCase()] = def;
-
-    const aliasRows = db.prepare('SELECT alias, canonical_name FROM attr_aliases').all();
-    const aliasToCanonical = {};
-    for (const a of aliasRows) aliasToCanonical[a.alias.toLowerCase()] = a.canonical_name.toLowerCase();
-
-    // Tagi wewnętrzne hurtowni — wyklucz z wyświetlania
-    const INTERNAL_TAGS = new Set([
-      // Kategorie/grupy
-      'podkategoria','nadkategoria','podgrupa towarowa','grupa towarowa',
-      'kategoria 1','kategoria 2','kategoria 3','kategoria','kategoria kablowa','kategoria kabla',
-      '_kategoria (wewnętrzna)',
-      // Kody / ID produktów
-      'id produktu','id','nr artykułu','nr. artykułu','numer artykułu','indeks','index',
-      'kod producenta','kod produktu','symbol','sku','erp','elkocode','cn code','cncode',
-      'nr katalogowy','numer katalogowy','kod towaru','kod ean','kod kreskowy',
-      // Ceny i marże
-      'cena detaliczna brutto','cena detaliczna netto','cena zakupu','cena',
-      'cena brutto','cena netto','cena hurtowa','cena + marża','cena + marza',
-      'marża','marza','narzut','rabat',
-      // Magazyn / dostępność / stany
-      'dostępność','dostepnosc','ilość','ilosc','stan magazynowy','stan mag.',
-      'produkt z magazynu','produkt gabarytowy','gabaryt',
-      // Opis / dokumentacja
-      'opis','nazwa','krótki opis','dane producenta','informacje dodatkowe','uwagi',
-      // Logistyczne / opakowanie
-      'opakowanie','opakowanie zbiorcze','wymiary opakowania',
-      'głębokość opakowania','szerokość opakowania','wysokość opakowania',
-      'waga brutto','waga netto',
-      // Administracyjne
-      'data dodania','producent','data',
-    ]);
-
-    // Pobierz raw SPA dla wszystkich EAN-ów (2ms)
-    const supplierAttrsMap = {}; // ean -> {canonical_attr_name -> value}
-    const rawAttrsMap = {};       // ean -> {attr_name -> first_value} (cechy nie zmapowane do category_attributes)
-
-    if (eans.length > 0) {
-      const spaRows = db.prepare(`
-        SELECT spa.ean, spa.attr_name, spa.attr_value
-        FROM supplier_product_attrs spa
-        WHERE spa.ean IN (${eans.map(() => '?').join(',')})
-      `).all(...eans);
-
-      for (const row of spaRows) {
-        const lowerName = row.attr_name.toLowerCase();
-
-        // Mapowanie przez alias → category_attributes
-        const canonicalLower = aliasToCanonical[lowerName];
-        if (canonicalLower) {
-          const catDef = catAttrByLower[canonicalLower];
-          if (catDef) {
-            if (!supplierAttrsMap[row.ean]) supplierAttrsMap[row.ean] = {};
-            if (!supplierAttrsMap[row.ean][catDef.attr_name]) {
-              supplierAttrsMap[row.ean][catDef.attr_name] = { ...catDef, attr_value: row.attr_value };
-            }
-          }
-        }
-
-        // Raw SPA fallback — cechy nie zmapowane, nie-wewnętrzne, z wartością
-        const isJunk = INTERNAL_TAGS.has(lowerName)
-          // Ceny, marże, koszty
-          || /cena|marż|marza|brutto|netto|narzut|sprzedaż|kupna|price|rabat|discount/i.test(lowerName)
-          // Kody, ID, indeksy
-          || /\bid\b|kod\b|code\b|index\b|indeks|sku\b|erp\b|symbol\b|elko|artykuł|artykul|nr\.\s*art|numer art|katalog/i.test(lowerName)
-          // Magazyn, dostępność, stany
-          || /magazyn|dostępn|dostepn|\bilosc\b|\bilość\b|gabaryt|produkt z mag|stan mag/i.test(lowerName)
-          // Opakowanie / logistyczne
-          || /opakow|wymiary opak|waga\s+(brutto|netto)/i.test(lowerName)
-          // Kategorie, grupy
-          || /\bkategor|\bgrupa\b|\bpodkategor|\bnadkategor|\bpodgrupa/i.test(lowerName)
-          // Opis, uwagi, dane administracyjne
-          || /^(opis|nazwa|uwagi|dane\s+producenta|informacje\s+dodatk|krótki\s+opis|short\s+desc|description)$/i.test(lowerName)
-          // Wartości jako nazwy (np. "0.5A", "1 x USB", "A1453") — nazwa atrybutu zaczyna się od cyfry lub wygląda jak wartość
-          || /^\d/.test(row.attr_name.trim())
-          // Puste lub za krótkie nazwy
-          || lowerName.trim().length < 2;
-
-        if (!isJunk && row.attr_value && row.attr_value.trim()) {
-          if (!rawAttrsMap[row.ean]) rawAttrsMap[row.ean] = {};
-          if (!rawAttrsMap[row.ean][row.attr_name]) {
-            rawAttrsMap[row.ean][row.attr_name] = row.attr_value.trim();
-          }
-        }
-      }
+      `SELECT attr_name, attr_type, attr_unit FROM category_attributes
+       WHERE category_id IN (${catScope.map(() => '?').join(',')})
+       ORDER BY sort_order, attr_name`
+    ).all(...catScope);
+    const seenDefs = new Set();
+    const uniqueDefs = [];
+    for (const def of catAttrDefs) {
+      const k = def.attr_name.toLowerCase();
+      if (seenDefs.has(k)) continue;
+      seenDefs.add(k);
+      uniqueDefs.push(def);
     }
 
     // 3. Batch suppliers (1 query zamiast N queries)
     const suppliersMap = {}; // ean -> [{supplier_name, price_pln, stock_quantity, availability}]
     if (eans.length > 0) {
+      const expanded = expandEans(eans);
+      const norms = eans.map(normalizeEan).filter(Boolean);
+      const offerWhere = [`sup.price_pln > 0`];
+      const offerParams = [];
+      if (expanded.length) {
+        offerWhere.push(`sup.ean IN (${expanded.map(() => '?').join(',')})`);
+        offerParams.push(...expanded);
+      }
+      if (norms.length) {
+        offerWhere.push(`sup.normalized_ean IN (${norms.map(() => '?').join(',')})`);
+        offerParams.push(...norms);
+      }
       const suppRows = db.prepare(`
-        SELECT s.name AS supplier_name, sup.price_pln, sup.stock_quantity, sup.availability, sup.ean
+        SELECT s.name AS supplier_name, sup.price_pln, sup.stock_quantity, sup.availability, sup.ean, sup.normalized_ean
         FROM supplier_products sup
         JOIN suppliers s ON s.id = sup.supplier_id
-        WHERE sup.ean IN (${eans.map(() => '?').join(',')}) AND sup.price_pln > 0
+        WHERE (${offerWhere.slice(1).join(' OR ')}) AND sup.price_pln > 0
         ORDER BY sup.price_pln ASC
-      `).all(...eans);
+      `).all(...offerParams);
       for (const row of suppRows) {
-        if (!suppliersMap[row.ean]) suppliersMap[row.ean] = [];
-        suppliersMap[row.ean].push(row);
+        for (const k of expandEans([row.ean, row.normalized_ean])) {
+          if (!suppliersMap[k]) suppliersMap[k] = [];
+          if (!suppliersMap[k].some(x => x.supplier_name === row.supplier_name && x.ean === row.ean)) {
+            suppliersMap[k].push(row);
+          }
+        }
       }
     }
 
     const enriched = products
       .map(p => {
-        const suppliers = suppliersMap[p.canonical_ean] || [];
+        const suppliers = firstMapHit(suppliersMap, p.canonical_ean) || [];
 
-        // Pomiń produkty bez żadnego dostawcy z ceną > 0
-        if (suppliers.length === 0) return null;
+        if (suppliers.length === 0 && !(p.effective_buy_price > 0 || p.best_supplier_price > 0)) return null;
 
         // Oblicz effective_buy_price i supplier_stock
         const cheapestInStock = suppliers.find(s => (s.stock_quantity || 0) > 0);
@@ -416,46 +371,18 @@ router.get('/components/:catId', (req, res) => {
         const supplier_stock = suppliers.reduce((s, r) => s + (r.stock_quantity || 0), 0);
 
         const manualForProd = manualAttrsMap[p.id] || {};
-        const supplierForEan = supplierAttrsMap[p.canonical_ean] || {};
-        const rawForEan = rawAttrsMap[p.canonical_ean] || {};
+        let raw = {};
+        try { raw = JSON.parse(p.raw_attributes || '{}'); } catch { raw = {}; }
+        const attributes = attrSync.buildAttributeList(raw, manualForProd, uniqueDefs, aliasMap);
 
-        // Scal mapped attrs: manual > hurtownia (przez category_attributes)
-        const mappedAttributes = catAttrDefs
-          .map(def => {
-            const manual = manualForProd[def.attr_name];
-            const supplier = supplierForEan[def.attr_name];
-            let value_text = null;
-            let value_numeric = null;
-            if (manual && (manual.value_text !== null || manual.value_numeric !== null)) {
-              value_text = manual.value_text;
-              value_numeric = manual.value_numeric;
-            } else if (supplier && supplier.attr_value !== null) {
-              if (def.attr_type === 'numeric') {
-                const parsed = parseFloat(supplier.attr_value);
-                value_numeric = isNaN(parsed) ? null : parsed;
-              } else {
-                value_text = supplier.attr_value;
-              }
-            }
-            return { attr_name: def.attr_name, attr_type: def.attr_type, attr_unit: def.attr_unit || null, value_text, value_numeric, source: 'mapped' };
-          })
-          .filter(a => a.value_text !== null || a.value_numeric !== null);
-
-        // Raw SPA attrs (fallback dla kategorii bez pełnego mapowania)
-        const mappedNames = new Set(mappedAttributes.map(a => a.attr_name.toLowerCase()));
-        const rawAttributes = Object.entries(rawForEan)
-          .filter(([k]) => !mappedNames.has(k.toLowerCase()))
-          .map(([k, v]) => ({ attr_name: k, attr_type: 'text', attr_unit: null, value_text: v, value_numeric: null, source: 'raw' }));
-
-        const attributes = [...mappedAttributes, ...rawAttributes];
-
+        const { raw_attributes, ...rest } = p;
         return {
-          ...p,
+          ...rest,
           in_subiekt: p.subiekt_stock != null,
           effective_buy_price,
           supplier_stock,
           attributes,
-          suppliers: suppliers.slice(0, 5), // max 5 dostawców
+          suppliers: suppliers.slice(0, 5),
         };
       })
       .filter(Boolean); // usuń null (produkty bez ceny)
@@ -482,14 +409,21 @@ router.get('/product-attrs/:id', (req, res) => {
                SELECT spa.attr_value
                FROM supplier_product_attrs spa
                JOIN attr_aliases aa ON LOWER(aa.alias) = LOWER(spa.attr_name)
-               WHERE spa.ean = ? AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
+               WHERE (spa.ean IN (${eanVariants(product.canonical_ean).map(() => '?').join(',') || '?'})
+                      OR spa.normalized_ean = ?)
+                 AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
                LIMIT 1
              ) AS supplier_value
       FROM category_attributes ca
       LEFT JOIN product_attributes pa ON pa.attribute_id = ca.id AND pa.catalog_id = ?
       WHERE ca.category_id = ?
       ORDER BY ca.sort_order, ca.attr_name
-    `).all(product.canonical_ean, id, product.category_id);
+    `).all(
+      ...(eanVariants(product.canonical_ean).length ? eanVariants(product.canonical_ean) : [product.canonical_ean]),
+      normalizeEan(product.canonical_ean),
+      id,
+      product.category_id
+    );
 
     res.json({ ok: true, product, attributes: attrs });
   } catch (err) {
@@ -505,11 +439,21 @@ router.post('/product-attrs/:id', (req, res) => {
     const { attribute_id, value_text, value_numeric } = req.body;
     if (!attribute_id) return res.status(400).json({ error: 'attribute_id wymagane' });
 
-    db.prepare(`
-      INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
-    `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    attrSync.ensureProductAttrSource(db);
+    try {
+      db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source)
+        VALUES (?, ?, ?, ?, 'manual')
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET
+          value_text=excluded.value_text, value_numeric=excluded.value_numeric, source='manual'
+      `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    } catch (_) {
+      db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
+      `).run(catalogId, attribute_id, value_text || null, value_numeric != null ? parseFloat(value_numeric) : null);
+    }
 
     res.json({ ok: true });
   } catch (err) {
@@ -525,11 +469,22 @@ router.post('/product-attrs/:id/bulk', (req, res) => {
     const { attributes } = req.body; // [{attribute_id, value_text, value_numeric}]
     if (!Array.isArray(attributes)) return res.status(400).json({ error: 'attributes musi byc tablica' });
 
-    const upsert = db.prepare(`
-      INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
-      VALUES (?, ?, ?, ?)
-      ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
-    `);
+    attrSync.ensureProductAttrSource(db);
+    let upsert;
+    try {
+      upsert = db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source)
+        VALUES (?, ?, ?, ?, 'manual')
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET
+          value_text=excluded.value_text, value_numeric=excluded.value_numeric, source='manual'
+      `);
+    } catch (_) {
+      upsert = db.prepare(`
+        INSERT INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(catalog_id, attribute_id) DO UPDATE SET value_text=excluded.value_text, value_numeric=excluded.value_numeric
+      `);
+    }
 
     const doAll = db.transaction(() => {
       for (const a of attributes) {
@@ -562,7 +517,7 @@ router.get('/setup/coverage', (req, res) => {
 
     const result = cats.map(c => ({
       ...c,
-      is_pc_component: ['procesor', 'plyta', 'chlodzenie', 'pamiec', 'dysk', 'karta', 'zasilacz', 'obudowa', 'system', 'cpu', 'mainboard', 'kuhler', 'arbeitsspeicher', 'festplatten', 'grafikkarten', 'netzteile', 'gehause', 'ssd', 'hdd'].some(k => normalizeStr(c.name).includes(k)),
+      is_pc_component: isPcComponentName(c.name),
       coverage_pct: c.product_count > 0 ? Math.round((c.products_with_attrs / c.product_count) * 100) : 0,
     }));
 
@@ -644,6 +599,8 @@ router.put('/offers/:id', (req, res) => {
       discount_pct, status, variant_label
     } = req.body;
 
+    const existing = db.prepare('SELECT * FROM oferter_quotes WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Oferta nie znaleziona' });
     db.prepare(`
       UPDATE oferter_quotes SET
         title = ?, client_name = ?, client_email = ?, client_phone = ?, client_company = ?,
@@ -652,14 +609,24 @@ router.put('/offers/:id', (req, res) => {
         discount_pct = ?, status = ?, variant_label = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
-      title, client_name, client_email, client_phone, client_company,
-      notes_client, notes_internal,
-      preferences ? JSON.stringify(preferences) : null,
-      components ? JSON.stringify(components) : null,
-      services ? JSON.stringify(services) : null,
-      skipped_components ? JSON.stringify(skipped_components) : null,
-      total_buy_price || 0, margin_value || 0, discount_value || 0,
-      discount_pct || 0, status || 'draft', variant_label, id
+      title ?? existing.title,
+      client_name ?? existing.client_name,
+      client_email ?? existing.client_email,
+      client_phone ?? existing.client_phone,
+      client_company ?? existing.client_company,
+      notes_client ?? existing.notes_client,
+      notes_internal ?? existing.notes_internal,
+      preferences ? JSON.stringify(preferences) : existing.preferences,
+      components ? JSON.stringify(components) : existing.components,
+      services ? JSON.stringify(services) : existing.services,
+      skipped_components ? JSON.stringify(skipped_components) : existing.skipped_components,
+      total_buy_price != null ? total_buy_price : existing.total_buy_price,
+      margin_value != null ? margin_value : existing.margin_value,
+      discount_value != null ? discount_value : existing.discount_value,
+      discount_pct != null ? discount_pct : existing.discount_pct,
+      status || existing.status || 'draft',
+      variant_label ?? existing.variant_label,
+      id
     );
 
     res.json({ ok: true });
@@ -685,7 +652,7 @@ router.delete('/offers/:id', (req, res) => {
 router.get('/services', (req, res) => {
   try {
     const db = getDb();
-    const services = db.prepare(`SELECT * FROM oferter_services ORDER BY name`).all();
+    const services = db.prepare(`SELECT * FROM oferter_services WHERE COALESCE(is_active, 1) = 1 ORDER BY name`).all();
     res.json({ ok: true, services });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -714,49 +681,25 @@ router.post('/compatibility', (req, res) => {
     if (!components || !Array.isArray(components)) return res.json({ ok: true, messages: [], isValid: true });
     
     const db = getDb();
-    
-    // Pobierzmy informacje o wszystkich komponentach (EAN, kategoria)
-    const catalogItems = db.prepare(`
-      SELECT cm.id, cm.canonical_ean, cm.category_id, cm.category_name
+    const aliasMap = attrSync.loadAliasMaps(db);
+    const catalogRows = db.prepare(`
+      SELECT cm.id, cm.canonical_ean, cm.category_id, cm.category_name, cm.raw_attributes
       FROM catalog_master cm
       WHERE cm.id IN (${components.map(() => '?').join(',')})
     `).all(...components);
 
-    // Pobierz wszystkie definicje atrybutow dla kategorii komponentow (bez duplikatow)
-    const catIds = [...new Set(catalogItems.map(c => c.category_id))];
-
-    // Prepared statement: dla danego komponentu pobierz scalone cechy (manualne + hurtownia)
-    const attrForCompStmt = db.prepare(`
-      SELECT
-        ca.attr_name, ca.attr_type,
-        pa.value_text, pa.value_numeric,
-        (
-          SELECT spa.attr_value
-          FROM supplier_product_attrs spa
-          JOIN attr_aliases aa ON LOWER(aa.alias) = LOWER(spa.attr_name)
-          WHERE spa.ean = ? AND LOWER(aa.canonical_name) = LOWER(ca.attr_name)
-          LIMIT 1
-        ) AS supplier_value
-      FROM category_attributes ca
-      LEFT JOIN product_attributes pa ON pa.attribute_id = ca.id AND pa.catalog_id = ?
-      WHERE ca.category_id = ?
-    `);
-
-    // Organizacja w mapy per kategoria -> atrybuty (manualne z priorytetem, hurtownia fallback)
     const compMap = {};
-    for (const item of catalogItems) {
-      if (!compMap[item.category_name]) compMap[item.category_name] = {};
-      const attrs = attrForCompStmt.all(item.canonical_ean, item.id, item.category_id);
+    for (const item of catalogRows) {
+      const catName = item.category_name || '';
+      if (!compMap[catName]) compMap[catName] = {};
+      const defs = item.category_id
+        ? db.prepare('SELECT attr_name, attr_type, attr_unit FROM category_attributes WHERE category_id = ?').all(item.category_id)
+        : [];
+      const attrs = attrSync.attributesFromCatalog(db, item, defs, aliasMap);
       for (const a of attrs) {
-        const hasManual = a.value_text !== null || a.value_numeric !== null;
-        let val;
-        if (hasManual) {
-          val = a.value_numeric !== null ? a.value_numeric : a.value_text;
-        } else if (a.supplier_value !== null) {
-          val = a.attr_type === 'numeric' ? (parseFloat(a.supplier_value) || a.supplier_value) : a.supplier_value;
-        }
-        if (val !== null && val !== undefined) {
-          compMap[item.category_name][a.attr_name] = val;
+        const val = a.value_numeric != null ? a.value_numeric : a.value_text;
+        if (val != null && val !== '') {
+          if (compMap[catName][a.attr_name] == null) compMap[catName][a.attr_name] = val;
         }
       }
     }
@@ -767,77 +710,139 @@ router.post('/compatibility', (req, res) => {
     // Helper function
     const norm = (s) => (s||'').toString().toLowerCase().trim();
 
+    const compactToken = (s) => attrSync.fold(s).replace(/[\s\-_]/g, '');
+    const socketsCompatible = (haystack, needle) => {
+      const cpuN = compactToken(needle);
+      if (!cpuN) return true;
+      const parts = String(haystack || '').split(/[,;/|+]| i /i).map(compactToken).filter(Boolean);
+      const pool = parts.length ? parts : [compactToken(haystack)].filter(Boolean);
+      return pool.some(p => p === cpuN || p.includes(cpuN) || cpuN.includes(p));
+    };
+    const ramTypesCompatible = (mbType, ramType) => {
+      const a = compactToken(mbType);
+      const b = compactToken(ramType);
+      if (!a || !b) return true;
+      const gen = (s) => (s.match(/ddr[0-9]/) || [null])[0];
+      const ga = gen(a), gb = gen(b);
+      if (ga && gb) return ga === gb;
+      return a.includes(b) || b.includes(a);
+    };
+    const FORM_RANK = [
+      ['eeatx', 6], ['extendedatx', 6], ['eatx', 6],
+      ['microatx', 3], ['matx', 3],
+      ['miniitx', 2], ['itx', 2],
+      ['ministx', 1],
+      ['atx', 4],
+    ];
+    const formRank = (s) => {
+      const n = compactToken(s);
+      let best = null;
+      for (const [k, v] of FORM_RANK) {
+        if (n.includes(k) && (!best || k.length > best.key.length)) best = { key: k, v };
+      }
+      return best ? best.v : null;
+    };
+
+    const pickComp = (...keys) => pickComponentAttrs(compMap, keys);
+    const attrOf = (obj, ...names) => {
+      if (!obj) return null;
+      for (const n of names) {
+        if (obj[n] != null && obj[n] !== '') return obj[n];
+        const hit = Object.keys(obj).find(k => attrSync.namesMatch(k, n));
+        if (hit) return obj[hit];
+      }
+      return null;
+    };
+
     // 1. Zgodnosc CPU <-> Plyta
-    const cpu = compMap['Procesory'];
-    const mb = compMap['Płyty główne'];
+    const cpu = pickComp('procesor', 'cpu');
+    const mb = pickComp('plyty glowne', 'plyta glowna', 'mainboard', 'motherboard', 'plyty', 'plyta');
     if (cpu && mb) {
-      if (norm(cpu['Socket']) && norm(mb['Socket']) && norm(cpu['Socket']) !== norm(mb['Socket'])) {
+      const cpuSock = attrOf(cpu, 'Socket');
+      const mbSock = attrOf(mb, 'Socket');
+      if (cpuSock && mbSock && !socketsCompatible(mbSock, cpuSock) && !socketsCompatible(cpuSock, mbSock)) {
         isValid = false;
-        messages.push({ type: 'error', text: `Niezgodny Socket! Procesor wymaga ${cpu['Socket']}, a wybrana płyta posiada ${mb['Socket']}.` });
+        messages.push({ type: 'error', text: `Niezgodny Socket! Procesor wymaga ${cpuSock}, a wybrana płyta posiada ${mbSock}.` });
       }
     }
 
     // 2. RAM <-> Plyta
-    const ram = compMap['Pamięci RAM'];
+    const ram = pickComp('pamiec ram', 'pamieci ram', 'moduly ram', 'dimm', 'so-dimm');
     if (mb && ram) {
-      if (norm(mb['Typ pamięci RAM']) && norm(ram['Typ']) && !norm(mb['Typ pamięci RAM']).includes(norm(ram['Typ']))) {
+      const mbType = attrOf(mb, 'Typ pamięci RAM', 'Typ');
+      const ramType = attrOf(ram, 'Typ', 'Typ pamięci RAM');
+      if (mbType && ramType && !ramTypesCompatible(mbType, ramType)) {
          isValid = false;
-         messages.push({ type: 'error', text: `Niezgodny typ pamięci! Płyta obsługuje ${mb['Typ pamięci RAM']}, wybrano pamięć ${ram['Typ']}.` });
+         messages.push({ type: 'error', text: `Niezgodny typ pamięci! Płyta obsługuje ${mbType}, wybrano pamięć ${ramType}.` });
       }
-      if (mb['Sloty RAM'] && ram['Liczba kości'] && ram['Liczba kości'] > mb['Sloty RAM']) {
+      const slots = attrOf(mb, 'Sloty RAM');
+      const sticks = attrOf(ram, 'Liczba kości', 'Liczba kosci');
+      if (slots && sticks && Number(sticks) > Number(slots)) {
          isValid = false;
-         messages.push({ type: 'error', text: `Zbyt dużo kości RAM (${ram['Liczba kości']}). Płyta posiada tylko ${mb['Sloty RAM']} slotów.` });
+         messages.push({ type: 'error', text: `Zbyt dużo kości RAM (${sticks}). Płyta posiada tylko ${slots} slotów.` });
       }
     }
 
     // 3. CPU <-> Chłodzenie (TDP)
-    const cooler = compMap['Chłodzenie CPU'] || compMap['Chłodzenie wodne'];
+    const cooler = pickComp('wentylatory do procesor', 'chlodzenie procesor', 'chlodzenie cpu', 'cpu cooler', 'kuhler', 'heatsink', 'chlodzenie wodne', 'chlodzen');
     if (cpu && cooler) {
-      if (cooler['Max TDP'] && cpu['TDP'] && cooler['Max TDP'] < cpu['TDP']) {
-         messages.push({ type: 'warning', text: `Chłodzenie może być zbyt słabe. Max TDP chłodzenia (${cooler['Max TDP']}W) jest mniejsze niż TDP procesora (${cpu['TDP']}W).` });
+      const maxTdp = attrOf(cooler, 'Max TDP', 'TDP');
+      const cpuTdp = attrOf(cpu, 'TDP');
+      if (maxTdp && cpuTdp && Number(maxTdp) < Number(cpuTdp)) {
+         messages.push({ type: 'warning', text: `Chłodzenie może być zbyt słabe. Max TDP chłodzenia (${maxTdp}W) jest mniejsze niż TDP procesora (${cpuTdp}W).` });
       }
-      if (cooler['Kompatybilne sockety'] && cpu['Socket'] && !norm(cooler['Kompatybilne sockety']).includes(norm(cpu['Socket']))) {
+      const coolerSock = attrOf(cooler, 'Kompatybilne sockety', 'Socket');
+      const cpuSock = attrOf(cpu, 'Socket');
+      if (coolerSock && cpuSock && !socketsCompatible(coolerSock, cpuSock)) {
          isValid = false;
-         messages.push({ type: 'error', text: `Chłodzenie nie pasuje do gniazda procesora (${cpu['Socket']}).` });
+         messages.push({ type: 'error', text: `Chłodzenie nie pasuje do gniazda procesora (${cpuSock}).` });
       }
     }
 
     // 4. Płyta <-> Obudowa
-    const casePc = compMap['Obudowy komputerowe'];
+    const casePc = pickComp('obudowy komputerowe', 'obudowy pc', 'gehause', 'obudow', 'case');
     if (mb && casePc) {
-      if (casePc['Format płyty'] && mb['Format'] && !norm(casePc['Format płyty']).includes(norm(mb['Format']))) {
+      const caseFmt = attrOf(casePc, 'Format płyty', 'Format');
+      const mbFmt = attrOf(mb, 'Format', 'Format płyty');
+      const caseRank = formRank(caseFmt);
+      const mbRank = formRank(mbFmt);
+      if (caseRank != null && mbRank != null && mbRank > caseRank) {
         isValid = false;
-        messages.push({ type: 'error', text: `Płyta główna (${mb['Format']}) nie zmieści się w obudowie (wspiera ${casePc['Format płyty']}).` });
+        messages.push({ type: 'error', text: `Płyta główna (${mbFmt}) nie zmieści się w obudowie (wspiera ${caseFmt}).` });
       }
     }
 
     // 5. Chłodzenie <-> Obudowa
     if (cooler && casePc) {
-      if (cooler['Typ chłodzenia'] && norm(cooler['Typ chłodzenia']).includes('powietrz') && cooler['Wysokość'] && casePc['Maks. wys. chłodzenia']) {
-        if (cooler['Wysokość'] > casePc['Maks. wys. chłodzenia']) {
+      const coolerType = attrOf(cooler, 'Typ chłodzenia', 'Typ');
+      const coolerH = attrOf(cooler, 'Wysokość', 'Wysokosc');
+      const caseH = attrOf(casePc, 'Maks. wys. chłodzenia', 'Wysokość');
+      if (coolerType && norm(coolerType).includes('powietrz') && coolerH && caseH) {
+        if (Number(coolerH) > Number(caseH)) {
           isValid = false;
-          messages.push({ type: 'error', text: `Chłodzenie jest za wysokie (${cooler['Wysokość']}mm). Obudowa mieści max ${casePc['Maks. wys. chłodzenia']}mm.` });
+          messages.push({ type: 'error', text: `Chłodzenie jest za wysokie (${coolerH}mm). Obudowa mieści max ${caseH}mm.` });
         }
       }
     }
 
     // 6. Karta graficzna <-> Obudowa
-    const gpu = compMap['Karty graficzne'];
+    const gpu = pickComp('graficzn', 'gpu', 'vga');
     if (gpu && casePc) {
-      if (gpu['Długość karty'] && casePc['Maks. dł. karty graficznej']) {
-         if (gpu['Długość karty'] > casePc['Maks. dł. karty graficznej']) {
-           isValid = false;
-           messages.push({ type: 'error', text: `Karta graficzna jest za długa (${gpu['Długość karty']}mm). Obudowa mieści max ${casePc['Maks. dł. karty graficznej']}mm.` });
-         }
+      const gpuL = attrOf(gpu, 'Długość karty', 'Dlugosc karty');
+      const caseL = attrOf(casePc, 'Maks. dł. karty graficznej', 'Długość karty');
+      if (gpuL && caseL && Number(gpuL) > Number(caseL)) {
+        isValid = false;
+        messages.push({ type: 'error', text: `Karta graficzna jest za długa (${gpuL}mm). Obudowa mieści max ${caseL}mm.` });
       }
     }
 
     // 7. Zasilacz moc vs (CPU + GPU + 50W zapasu)
-    const psu = compMap['Zasilacze'];
+    const psu = pickComp('zasilacz', 'psu', 'netzteil');
     if (psu && cpu && gpu) {
-      const needed = (cpu['TDP'] || 100) + (gpu['TDP'] || 250) + 50;
-      if (psu['Moc'] && psu['Moc'] < needed) {
-        messages.push({ type: 'warning', text: `Moc zasilacza (${psu['Moc']}W) może być niewystarczająca. Sugerowana moc dla zestawu to min. ${needed}W.` });
+      const needed = (Number(attrOf(cpu, 'TDP')) || 100) + (Number(attrOf(gpu, 'TDP')) || 250) + 50;
+      const psuW = attrOf(psu, 'Moc');
+      if (psuW && Number(psuW) < needed) {
+        messages.push({ type: 'warning', text: `Moc zasilacza (${psuW}W) może być niewystarczająca. Sugerowana moc dla zestawu to min. ${needed}W.` });
       }
     }
 
@@ -866,13 +871,25 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
   }
 
   const db = getDb();
+  const scopeIds = attrSync.expandCategoryIds(db, [catId]);
+  const catScope = scopeIds.length ? scopeIds : [catId];
+  const ph = catScope.map(() => '?').join(',');
   const products = db.prepare(`
-    SELECT cm.id, cm.name, cm.manufacturer, sp.description
+    SELECT cm.id, cm.name, cm.manufacturer,
+      (SELECT sp.description FROM supplier_products sp
+       WHERE ${offerMatchSql('sp')} AND sp.description IS NOT NULL AND trim(sp.description) != ''
+       LIMIT 1) AS description
     FROM catalog_master cm
-    JOIN supplier_products sp ON sp.ean = cm.canonical_ean
-    WHERE cm.category_id = ?
-      AND cm.id NOT IN (SELECT catalog_id FROM product_attributes)
-  `).all(catId);
+    WHERE cm.category_id IN (${ph})
+      AND (
+        SELECT COUNT(*) FROM category_attributes ca WHERE ca.category_id = ?
+      ) > (
+        SELECT COUNT(DISTINCT pa.attribute_id)
+        FROM product_attributes pa
+        JOIN category_attributes ca ON ca.id = pa.attribute_id AND ca.category_id = ?
+        WHERE pa.catalog_id = cm.id
+      )
+  `).all(...catScope, catId, catId);
 
   batchStatus[catId] = { running: true, total: products.length, done: 0 };
   res.json({ ok: true, message: `Uruchomiono zadanie w tle. Do pobrania: ${products.length} produktów.` });
@@ -882,7 +899,13 @@ router.post('/product-attrs/batch-extract/:catId', async (req, res) => {
       const attrsDef = db.prepare('SELECT id, attr_name, attr_type FROM category_attributes WHERE category_id = ?').all(catId);
       if(!attrsDef.length) { batchStatus[catId].running = false; return; }
 
-      const insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+      attrSync.ensureProductAttrSource(db);
+      let insVal;
+      try {
+        insVal = db.prepare("INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, 'supplier')");
+      } catch (_) {
+        insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+      }
 
       for(const p of products) {
         if(!batchStatus[catId].running) break;
@@ -910,6 +933,8 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby (np. 105). Dla brakujących 
             for(const a of attrsDef) {
               const val = parsed[a.attr_name];
               if(val !== undefined && val !== null) {
+                const existing = db.prepare('SELECT source FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?').get(p.id, a.id);
+                if (existing && existing.source === 'manual') continue;
                 if(a.attr_type === 'numeric') {
                   insVal.run(p.id, a.id, null, parseFloat(val) || null);
                 } else {
@@ -936,7 +961,13 @@ router.post('/product-attrs/extract/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const db = getDb();
-    const p = db.prepare('SELECT cm.id, cm.category_id, cm.name, cm.manufacturer, sp.description FROM catalog_master cm JOIN supplier_products sp ON sp.ean = cm.canonical_ean WHERE cm.id = ?').get(id);
+    const p = db.prepare(`
+      SELECT cm.id, cm.category_id, cm.name, cm.manufacturer,
+        (SELECT sp.description FROM supplier_products sp
+         WHERE ${offerMatchSql('sp')} AND sp.description IS NOT NULL AND trim(sp.description) != ''
+         LIMIT 1) AS description
+      FROM catalog_master cm WHERE cm.id = ?
+    `).get(id);
     if(!p) return res.status(404).json({ error: 'Nie znaleziono produktu' });
 
     const attrsDef = db.prepare('SELECT id, attr_name, attr_type FROM category_attributes WHERE category_id = ?').all(p.category_id);
@@ -960,11 +991,19 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby. Dla brakujących przypisz n
     const cleanJson = reply.replace(/\x60\x60\x60json/g, '').replace(/\x60\x60\x60/g, '').trim();
     const parsed = JSON.parse(cleanJson);
     
-    const insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+    attrSync.ensureProductAttrSource(db);
+    let insVal;
+    try {
+      insVal = db.prepare("INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric, source) VALUES (?, ?, ?, ?, 'supplier')");
+    } catch (_) {
+      insVal = db.prepare('INSERT OR REPLACE INTO product_attributes (catalog_id, attribute_id, value_text, value_numeric) VALUES (?, ?, ?, ?)');
+    }
     db.transaction(() => {
       for(const a of attrsDef) {
         const val = parsed[a.attr_name];
         if(val !== undefined && val !== null) {
+          const existing = db.prepare('SELECT source FROM product_attributes WHERE catalog_id = ? AND attribute_id = ?').get(p.id, a.id);
+          if (existing && existing.source === 'manual') continue;
           if(a.attr_type === 'numeric') {
             insVal.run(p.id, a.id, null, parseFloat(val) || null);
           } else {
@@ -980,4 +1019,6 @@ Wartości numeryczne (np. 105W) zwracaj jako liczby. Dla brakujących przypisz n
   }
 });
 
+router.isPcComponentName = isPcComponentName;
+router.pickComponentAttrs = pickComponentAttrs;
 module.exports = router;
