@@ -2184,14 +2184,23 @@ async function fetchActionProducts(customerId, userName, apiKey, onProgress = nu
   } catch (err) {
     const msg = (err.response && err.response.data && err.response.data.errorMessage) || err.message;
     progress('[Action API] WARN: GetAll niedostepny, fallback:', msg);
-    progress('[Action API] 1/5 - Fallback: Product/GetExtraItems...');
-    const resp2 = await axios.get(BASE + '/Product/GetExtraItems', { headers, timeout: 90000 });
-    if (!resp2.data || !resp2.data.success) {
-      const status = err.response && err.response.status;
-      throw new Error('Action API blad (HTTP ' + status + '): ' + ((resp2.data && resp2.data.errorMessage) || err.message));
+    try {
+      progress('[Action API] 1/5 - Fallback: Product/GetExtraItems...');
+      const resp2 = await axios.get(BASE + '/Product/GetExtraItems', { headers, timeout: 90000 });
+      if (!resp2.data || !resp2.data.success) {
+        throw Object.assign(new Error((resp2.data && resp2.data.errorMessage) || 'GetExtraItems failed'), { response: resp2 });
+      }
+      mainProducts = Array.isArray(resp2.data.data) ? resp2.data.data : [];
+      progress('[Action API]   => Fallback: Pobrano ' + mainProducts.length + ' produktow z GetExtraItems');
+    } catch (err2) {
+      const status = (err2.response && err2.response.status) || (err.response && err.response.status);
+      const m2 = (err2.response && err2.response.data && err2.response.data.errorMessage) || err2.message;
+      if (status === 401) {
+        progress('[Action API] 401: ' + m2 + ' — pomijam REST API (uzywam plikow XML, jesli sa).');
+        return [];
+      }
+      throw new Error('Action API blad (HTTP ' + status + '): ' + m2);
     }
-    mainProducts = Array.isArray(resp2.data.data) ? resp2.data.data : [];
-    progress('[Action API]   => Fallback: Pobrano ' + mainProducts.length + ' produktow z GetExtraItems');
   }
 
   if (mainProducts.length === 0) return [];
