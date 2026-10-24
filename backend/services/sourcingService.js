@@ -1722,7 +1722,19 @@ function parseSupplierCsv(buffer, colSettings = {}) {
     cols.push(cur.trim()); return cols;
   };
 
-  const headers = parseLine(lines[0]).map(h => h.toLowerCase().replace(/^"|"$/g, '').trim());
+  const firstCols = parseLine(lines[0]).map(c => c.replace(/^"|"$/g, '').trim());
+  const looksLikeHeader = firstCols.some(c => /ean|gtin|barcode|price|cena|name|nazwa|sku|manufacturer|producent|stock|ilo[sś]c|quantity/i.test(c));
+  const looksLikeEan = firstCols.some(c => /^\d{12,14}$/.test(String(c).replace(/\s/g, '')));
+  const looksLikePrice = firstCols.some(c => /^\d+([.,]\d+)?$/.test(String(c).trim()));
+  const headerless = !looksLikeHeader && looksLikeEan && looksLikePrice;
+
+  if (headerless) {
+    const headers = firstCols.map((_, i) => `col_${i}`);
+    const dataRows = lines.map(l => parseLine(l));
+    return _parseTabular(headers, dataRows, colSettings);
+  }
+
+  const headers = firstCols.map(h => h.toLowerCase().trim());
   const dataRows = lines.slice(1).map(l => parseLine(l));
   return _parseTabular(headers, dataRows, colSettings);
 }
@@ -1748,7 +1760,8 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
                           'waga_brutto', 'waga_z_opakowaniem', 'masa_brutto', 'weight_gross', 'weight_brutto',
                           'waga', 'waga_netto', 'masa', 'masa_netto', 'weight', 'weight_net', 'gewicht'];
   const CAT_PATS = [
-    ...(colSettings.cat_field ? [colSettings.cat_field.toLowerCase()] : []),
+    ...(colSettings.cat_field != null && colSettings.cat_field !== '' && !/^(#)?\d+$/.test(String(colSettings.cat_field).trim())
+      ? [String(colSettings.cat_field).toLowerCase()] : []),
     'product group', 'product_group', 'product category', 'product_category', 'category', 'categories',
                           'kategoria', 'group', 'grupa', 'typ', 'type', 'klasa', 'class', 'rodzaj', 'dzial',
                           'podkategoria', 'subcategory', 'grupa_towarowa', 'nazwa_grupy', 'nazwa_kategorii', 'nazwa kategorii', 'komodita', 'kat1', 'kat2', 'kat3', 'kat4', 'kat5', 'kat6', 'catalogname', 'catalog name'];
@@ -1794,7 +1807,15 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
 
 
   const findCol = (pats, override) => {
-    if (override) { const i = headers.indexOf(override.toLowerCase()); if (i >= 0) return i; }
+    if (override !== undefined && override !== null && override !== '') {
+      const raw = String(override).trim();
+      if (/^(#)?\d+$/.test(raw)) {
+        const i = parseInt(raw.replace('#', ''), 10);
+        if (i >= 0 && i < headers.length) return i;
+      }
+      const i = headers.indexOf(raw.toLowerCase());
+      if (i >= 0) return i;
+    }
     for (const pat of pats) {
       const i = headers.findIndex(h => h === pat || h.includes(pat));
       if (i >= 0) return i;
@@ -1802,8 +1823,17 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
     return -1;
   };
 
-  const eanIdx   = findCol(EAN_PATS,   colSettings.ean_field);
-  const priceIdx = findCol(PRICE_PATS, colSettings.price_field);
+  let eanIdx   = findCol(EAN_PATS,   colSettings.ean_field);
+  let priceIdx = findCol(PRICE_PATS, colSettings.price_field);
+  if ((eanIdx < 0 || priceIdx < 0) && dataRows[0]) {
+    const row0 = dataRows[0];
+    if (eanIdx < 0) {
+      eanIdx = row0.findIndex(c => /^\d{12,14}$/.test(String(c).replace(/\s/g, '')));
+    }
+    if (priceIdx < 0) {
+      priceIdx = row0.findIndex((c, i) => i !== eanIdx && /^\d+[.,]\d{1,4}$/.test(String(c).trim()));
+    }
+  }
   if (eanIdx < 0 || priceIdx < 0) return [];
 
   const nameIdx  = findCol(NAME_PATS,  colSettings.name_field);
@@ -1814,7 +1844,7 @@ function _parseTabular(headers, dataRows, colSettings = {}) {
   const warrIdx  = findCol(WARR_PATS,  colSettings.warr_field);
   const weightIdx= findCol(WEIGHT_PATS,colSettings.weight_field);
   const catIdx   = findCol(CAT_PATS,   colSettings.cat_field);
-  const mfgCodeIdx  = findCol(MFG_CODE_PATS,  colSettings.mfg_code_field);
+  const mfgCodeIdx  = findCol(MFG_CODE_PATS,  colSettings.mfg_code_field || colSettings.manufacturer_code);
   const srpIdx      = findCol(SRP_PATS,       colSettings.srp_field);
   const priceGrossIdx = findCol(PRICE_GROSS_PATS, colSettings.price_gross_field);
   const priceEurIdx = findCol(PRICE_EUR_PATS,  colSettings.price_eur_field);
@@ -2719,6 +2749,17 @@ async function fetchFtpFile(supplier) {
     }
   }
 
+  try {
+    const viaCurl = await fetchFtpFileCurl({ host: cleanHost, port, user, pass, ftpPath });
+    if (viaCurl && viaCurl.length) {
+      console.log(`[FTP] OK (curl PASV skip-ip): ${cleanHost}:${port}${ftpPath} → ${viaCurl.length} bajtów`);
+      return viaCurl;
+    }
+  } catch (curlErr) {
+    console.warn(`[FTP] curl fallback: ${curlErr.message}`);
+    lastErr = lastErr || curlErr;
+  }
+
   // Build a helpful error message
   const hint = lastErr?.message?.includes('ECONNREFUSED') ? `Serwer ${cleanHost}:${port} odmawia połączenia — sprawdź host i port.`
              : lastErr?.message?.includes('ETIMEDOUT')    ? `Timeout — serwer ${cleanHost}:${port} nie odpowiada. Sprawdź firewall lub użyj SFTP (port 22).`
@@ -2726,6 +2767,37 @@ async function fetchFtpFile(supplier) {
              : lastErr?.message?.includes('550')          ? `Plik nie znaleziony (550) — sprawdź ścieżkę: "${ftpPath}".`
              : lastErr?.message || 'Nieznany błąd FTP';
   throw new Error(`FTP: ${hint}`);
+}
+
+async function fetchFtpFileCurl({ host, port, user, pass, ftpPath }) {
+  const os = require('os');
+  const { spawn } = require('child_process');
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sg-ftp-'));
+  const netrc = path.join(tmpDir, 'netrc');
+  const out = path.join(tmpDir, 'download.bin');
+  const remote = ftpPath.startsWith('/') ? ftpPath : `/${ftpPath}`;
+  fs.writeFileSync(netrc, `machine ${host} login ${user} password ${pass}\n`, { mode: 0o600 });
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn('curl', [
+        '-sS', '-n', `--netrc-file=${netrc}`,
+        '--ftp-skip-pasv-ip', '--disable-epsv',
+        '--connect-timeout', '20', '--max-time', '600',
+        '-o', out,
+        `ftp://${host}:${port}${remote}`,
+      ], { stdio: ['ignore', 'ignore', 'pipe'] });
+      let err = '';
+      child.stderr.on('data', d => { err += d.toString(); });
+      child.on('error', reject);
+      child.on('close', code => {
+        if (code === 0 && fs.existsSync(out) && fs.statSync(out).size > 0) resolve();
+        else reject(new Error((err || `curl exit ${code}`).split('\n')[0]));
+      });
+    });
+    return fs.readFileSync(out);
+  } finally {
+    try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (_) {}
+  }
 }
 
 
